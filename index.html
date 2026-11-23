@@ -281,12 +281,6 @@
                     </div>
 
                     <div class="space-y-1.5">
-                        <label class="font-bold text-gray-700 block">あなたの Cloudflare Workers エンドポイントURL（任意）</label>
-                        <input type="url" id="workerUrlInput" placeholder="https://my-ai-boyfriend.your-subdomain.workers.dev" class="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500">
-                        <p class="text-[10px] text-gray-400">※設定するとチャット送信時にWorkers経由で履歴保存や通知連携ができるようになります。</p>
-                    </div>
-
-                    <div class="space-y-1.5">
                         <label class="font-bold text-gray-700 block">あなたの Cloudflare Workers エンドポイントURL</label>
                         <div class="flex gap-2">
                             <input type="url" id="workerUrlInput" placeholder="https://my-ai-boyfriend.your-subdomain.workers.dev" class="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500">
@@ -479,8 +473,16 @@
             syncToWorkerBackground();
         }
 
+        // URLの空白・改行・全角文字・末尾スラッシュを安全にお掃除する関数
+        function sanitizeWorkerUrl(rawUrl) {
+            if (!rawUrl) return '';
+            return rawUrl
+                .replace(/[\s\u3000\r\n]+/g, '') // 半角/全角スペース・改行を全除去
+                .replace(/\/+$/, '');             // 末尾のスラッシュを除去
+        }
+
         async function syncToWorkerBackground() {
-            const workerUrl = (appState.workerUrl || '').trim().replace(/\/$/, '');
+            const workerUrl = sanitizeWorkerUrl(appState.workerUrl);
             if (!workerUrl) return;
             try {
                 await fetch(`${workerUrl}/save-state`, {
@@ -497,7 +499,7 @@
         }
 
         async function syncFromWorker() {
-            const workerUrl = (appState.workerUrl || '').trim().replace(/\/$/, '');
+            const workerUrl = sanitizeWorkerUrl(appState.workerUrl);
             if (!workerUrl) return;
             try {
                 const res = await fetch(`${workerUrl}/sync`);
@@ -532,14 +534,16 @@
         }
 
         async function testWorkerConnection() {
-            const urlInput = document.getElementById('workerUrlInput').value.trim().replace(/\/$/, '');
+            const rawInput = document.getElementById('workerUrlInput').value;
+            const urlInput = sanitizeWorkerUrl(rawInput);
+            document.getElementById('workerUrlInput').value = urlInput;
             if (!urlInput) {
                 showToast('WorkersのURLを入力してください');
                 return;
             }
             showToast('Workersへ接続テスト中...');
             try {
-                const res = await fetch(urlInput);
+                const res = await fetch(`${urlInput}/api/health`);
                 const data = await res.json();
                 if (data.status) {
                     showToast('接続成功！Workersと正常に通信できました！');
@@ -613,7 +617,7 @@
         async function callGeminiText(userMessage, isProactive = false) {
             const bf = getActiveBoyfriend();
             const apiKey = appState.apiKey.trim();
-            const workerUrl = (appState.workerUrl || '').trim();
+            const workerUrl = sanitizeWorkerUrl(appState.workerUrl);
 
             if (!apiKey && !workerUrl) {
                 await new Promise(r => setTimeout(r, 900));
@@ -642,9 +646,8 @@
 
             // Cloudflare Workers URLが設定されている場合はそちらを優先利用（APIキー不要で安全に通信）
             if (workerUrl) {
-                const cleanUrl = workerUrl.replace(/\/$/, '');
                 try {
-                    const res = await fetch(cleanUrl, {
+                    const res = await fetch(workerUrl, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -1246,7 +1249,7 @@
         function saveSettings() {
             saveCurrentFormTemp();
             appState.apiKey = document.getElementById('apiKeyInput').value.trim();
-            appState.workerUrl = document.getElementById('workerUrlInput').value.trim();
+            appState.workerUrl = sanitizeWorkerUrl(document.getElementById('workerUrlInput').value);
             appState.autoTimerSeconds = parseInt(document.getElementById('autoTimerInput').value, 10);
             appState.activeBfId = editingBfId;
 
