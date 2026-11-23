@@ -1,0 +1,1289 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Sweet AI - AI彼氏専用アプリ</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body {
+            font-family: 'M PLUS Rounded 1c', sans-serif;
+            background-color: #fdf2f8;
+        }
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #fbcfe8;
+            border-radius: 10px;
+        }
+        @keyframes pulse-ring {
+            0% { transform: scale(0.85); opacity: 0.8; }
+            100% { transform: scale(1.35); opacity: 0; }
+        }
+        .pulse-ring {
+            animation: pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+        }
+        @keyframes breathe {
+            0%, 100% { transform: translateY(0px) scale(1); }
+            50% { transform: translateY(-5px) scale(1.015); }
+        }
+        .avatar-breathe {
+            animation: breathe 4s ease-in-out infinite;
+        }
+        @keyframes talking-glow {
+            0%, 100% { box-shadow: 0 0 15px rgba(244, 114, 182, 0.4); transform: scale(1); }
+            50% { box-shadow: 0 0 35px rgba(244, 114, 182, 0.95); transform: scale(1.03); }
+        }
+        .talking-active {
+            animation: talking-glow 0.7s ease-in-out infinite;
+        }
+    </style>
+</head>
+<body class="h-screen w-screen overflow-hidden flex items-center justify-center bg-gradient-to-br from-pink-100 via-rose-50 to-purple-100">
+
+    <!-- スマホ風メインコンテナ -->
+    <div class="w-full h-full sm:w-[420px] sm:h-[820px] sm:max-h-[95vh] bg-white sm:rounded-[36px] shadow-2xl overflow-hidden flex flex-col relative border-4 border-white">
+
+        <!-- 通知バナー（彼氏からの着信・メッセージ通知用） -->
+        <div id="notificationBanner" class="hidden absolute top-3 left-3 right-3 z-50 bg-white/95 backdrop-blur-md border border-pink-200 rounded-2xl p-3 shadow-lg flex items-center gap-3 cursor-pointer transition-all duration-300 transform -translate-y-full" onclick="dismissNotification()">
+            <div id="notifAvatar" class="w-11 h-11 rounded-full bg-gradient-to-tr from-pink-400 to-rose-500 flex items-center justify-center text-white font-bold text-lg shrink-0 overflow-hidden">
+                ♥
+            </div>
+            <div class="flex-1 min-w-0">
+                <div class="flex justify-between items-center">
+                    <span id="notifName" class="font-bold text-xs text-rose-600">彼氏</span>
+                    <span class="text-[10px] text-gray-400">たった今</span>
+                </div>
+                <p id="notifText" class="text-xs text-gray-700 truncate">メッセージが届きました</p>
+            </div>
+        </div>
+
+        <!-- ヘッダー -->
+        <header class="bg-white/90 backdrop-blur-sm border-b border-pink-100 px-4 py-3 flex items-center justify-between z-10 shrink-0">
+            <div class="flex items-center gap-3">
+                <!-- 彼氏切り替え/プロフィール -->
+                <div class="relative cursor-pointer" onclick="openSettingsModal()">
+                    <div id="headerAvatar" class="w-11 h-11 rounded-full bg-gradient-to-tr from-rose-400 to-pink-500 flex items-center justify-center text-white font-bold text-lg shadow-sm overflow-hidden">
+                        レン
+                    </div>
+                    <span class="absolute bottom-0 right-0 w-3 h-3 bg-emerald-400 border-2 border-white rounded-full"></span>
+                </div>
+                <div>
+                    <div class="flex items-center gap-1.5">
+                        <h1 id="headerName" class="font-bold text-gray-800 text-base">レン</h1>
+                        <button onclick="openSettingsModal()" class="text-xs bg-pink-50 text-pink-600 px-2 py-0.5 rounded-full hover:bg-pink-100 transition">
+                            切替・設定
+                        </button>
+                    </div>
+                    <p id="headerStatus" class="text-[11px] text-emerald-500 font-medium">オンライン • いつでも話せるよ</p>
+                </div>
+            </div>
+
+            <!-- 通話・ビデオ通話ボタン -->
+            <div class="flex items-center gap-2">
+                <button onclick="startCall('voice')" title="音声通話" class="w-10 h-10 rounded-full bg-pink-50 text-pink-600 hover:bg-pink-500 hover:text-white flex items-center justify-center transition shadow-sm">
+                    <i class="fa-solid fa-phone"></i>
+                </button>
+                <button onclick="startCall('video')" title="ビデオ通話" class="w-10 h-10 rounded-full bg-rose-50 text-rose-600 hover:bg-rose-500 hover:text-white flex items-center justify-center transition shadow-sm">
+                    <i class="fa-solid fa-video"></i>
+                </button>
+                <button onclick="openSettingsModal()" title="API・プロンプト・Workers設定" class="w-10 h-10 rounded-full bg-gray-50 text-gray-600 hover:bg-gray-200 flex items-center justify-center transition">
+                    <i class="fa-solid fa-gear"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- 彼氏からの自発メッセージ操作バー -->
+        <div class="bg-pink-50/70 px-4 py-2 border-b border-pink-100 flex items-center justify-between text-xs shrink-0">
+            <div class="flex items-center gap-1.5 text-pink-700">
+                <i class="fa-solid fa-heart-pulse text-rose-500"></i>
+                <span id="autoMsgStatus">自動連絡: オフ</span>
+            </div>
+            <button onclick="triggerBoyfriendMessage()" id="triggerMsgBtn" class="bg-white text-rose-600 border border-rose-200 px-2.5 py-1 rounded-full font-medium hover:bg-rose-500 hover:text-white transition shadow-sm flex items-center gap-1">
+                <i class="fa-solid fa-paper-plane text-[10px]"></i>
+                <span>今すぐ彼から連絡をもらう</span>
+            </button>
+        </div>
+
+        <!-- チャットメッセージエリア -->
+        <main id="chatContainer" class="flex-1 overflow-y-auto p-4 space-y-4 bg-[#fff9fb]">
+            <!-- 初期メッセージがJSで挿入されます -->
+        </main>
+
+        <!-- 入力中インジケーター -->
+        <div id="typingIndicator" class="hidden px-4 py-1.5 text-xs text-pink-500 flex items-center gap-2 bg-[#fff9fb]">
+            <span class="flex gap-1">
+                <span class="w-1.5 h-1.5 bg-pink-400 rounded-full animate-bounce"></span>
+                <span class="w-1.5 h-1.5 bg-pink-400 rounded-full animate-bounce" style="animation-delay: 0.15s"></span>
+                <span class="w-1.5 h-1.5 bg-pink-400 rounded-full animate-bounce" style="animation-delay: 0.3s"></span>
+            </span>
+            <span id="typingText">レンが入力中...</span>
+        </div>
+
+        <!-- メッセージ入力フォーム -->
+        <footer class="bg-white border-t border-pink-100 p-3 shrink-0">
+            <form id="chatForm" onsubmit="handleSendMessage(event)" class="flex items-end gap-2">
+                <div class="flex-1 bg-gray-50 rounded-2xl border border-pink-200 focus-within:border-pink-400 focus-within:bg-white transition px-3 py-2 flex items-center">
+                    <textarea id="messageInput" rows="1" placeholder="メッセージを入力..." class="w-full bg-transparent text-sm text-gray-800 focus:outline-none resize-none max-h-24" onkeydown="handleKeyDown(event)"></textarea>
+                </div>
+                <button type="submit" id="sendBtn" class="w-11 h-11 rounded-full bg-gradient-to-r from-pink-500 to-rose-500 text-white flex items-center justify-center shadow-md hover:opacity-90 transition shrink-0">
+                    <i class="fa-solid fa-paper-plane"></i>
+                </button>
+            </form>
+        </footer>
+
+        <!-- ========================================== -->
+        <!-- モーダル1: APIキー & 彼氏プロンプト & Workers設定 -->
+        <!-- ========================================== -->
+        <div id="settingsModal" class="hidden absolute inset-0 z-40 bg-black/50 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
+            <div class="bg-white w-full h-[92%] sm:h-auto sm:max-h-[92%] rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden">
+                <div class="px-5 py-4 border-b border-gray-100 flex justify-between items-center bg-pink-50/50">
+                    <h2 class="font-bold text-gray-800 flex items-center gap-2">
+                        <i class="fa-solid fa-sliders text-pink-500"></i>
+                        彼氏カスタム & 連携設定
+                    </h2>
+                    <button onclick="closeSettingsModal()" class="w-8 h-8 rounded-full bg-white text-gray-500 hover:text-gray-800 flex items-center justify-center shadow-xs">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+
+                <!-- タブ切り替え（彼氏設定 / Cloudflare Workers連携） -->
+                <div class="flex border-b border-gray-100 bg-gray-50/50 text-xs font-bold">
+                    <button type="button" id="tabBtnBf" onclick="switchSettingsTab('bf')" class="flex-1 py-2.5 text-pink-600 border-b-2 border-pink-500 bg-white">
+                        <i class="fa-solid fa-heart mr-1"></i> 彼氏イラスト・設定
+                    </button>
+                    <button type="button" id="tabBtnWorkers" onclick="switchSettingsTab('workers')" class="flex-1 py-2.5 text-gray-500 hover:text-gray-700">
+                        <i class="fa-solid fa-cloud-bolt mr-1 text-amber-500"></i> Cloudflare Workers連携
+                    </button>
+                </div>
+
+                <!-- タブ1: 彼氏設定 -->
+                <div id="tabContentBf" class="p-5 overflow-y-auto space-y-5 flex-1 text-sm">
+                    <!-- Google Gemini APIキー設定 -->
+                    <div class="bg-blue-50/70 p-3.5 rounded-2xl border border-blue-100 space-y-2">
+                        <label class="font-bold text-blue-900 flex items-center justify-between text-xs">
+                            <span><i class="fa-solid fa-key mr-1"></i> Google Gemini APIキー</span>
+                            <span id="apiStatusBadge" class="px-2 py-0.5 rounded-full text-[10px] bg-gray-200 text-gray-600">未設定（デモ動作中）</span>
+                        </label>
+                        <div class="flex gap-2">
+                            <input type="password" id="apiKeyInput" placeholder="AIzaSy..." class="flex-1 bg-white border border-blue-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-blue-500">
+                            <button type="button" onclick="toggleApiKeyVisibility()" class="px-3 py-2 bg-white border border-blue-200 rounded-xl text-gray-500 hover:text-gray-700 text-xs">
+                                <i id="eyeIcon" class="fa-solid fa-eye"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 彼氏プリセット選択・追加 -->
+                    <div>
+                        <div class="flex justify-between items-center mb-2">
+                            <label class="font-bold text-gray-700 text-xs">登録済みの彼氏を選択</label>
+                            <button type="button" onclick="createNewBoyfriend()" class="text-xs text-pink-600 font-bold hover:underline">
+                                + 新しい彼氏を追加
+                            </button>
+                        </div>
+                        <div id="boyfriendList" class="grid grid-cols-3 gap-2">
+                            <!-- JSで彼氏カードを生成 -->
+                        </div>
+                    </div>
+
+                    <!-- 選択中の彼氏の詳細編集 -->
+                    <div class="space-y-4 border-t border-gray-100 pt-4">
+                        
+                        <!-- 彼氏のイラスト・アイコンアップロード -->
+                        <div class="bg-pink-50/40 p-3.5 rounded-2xl border border-pink-100 flex items-center gap-4">
+                            <div id="previewAvatarBox" class="w-16 h-16 rounded-2xl bg-gradient-to-tr from-rose-400 to-pink-500 flex items-center justify-center text-white font-bold text-xl shrink-0 overflow-hidden shadow-sm border-2 border-white">
+                                レン
+                            </div>
+                            <div class="flex-1 space-y-1.5">
+                                <label class="block text-xs font-bold text-gray-700">彼氏のイラスト・立ち絵</label>
+                                <div class="flex flex-wrap gap-2">
+                                    <label class="cursor-pointer bg-white border border-pink-300 text-pink-600 hover:bg-pink-50 px-3 py-1.5 rounded-xl text-xs font-bold transition shadow-2xs inline-flex items-center gap-1">
+                                        <i class="fa-regular fa-image"></i>
+                                        <span>画像を選ぶ</span>
+                                        <input type="file" id="bfImageUpload" accept="image/*" class="hidden" onchange="handleImageUpload(event)">
+                                    </label>
+                                    <button type="button" id="removeImgBtn" onclick="removeBoyfriendImage()" class="hidden text-xs text-gray-400 hover:text-red-500 px-2 py-1">
+                                        削除
+                                    </button>
+                                </div>
+                                <p class="text-[10px] text-gray-500">※チャットアイコンやビデオ通話画面に表示されます</p>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-xs font-bold text-gray-700 mb-1">彼氏の名前</label>
+                                <input type="text" id="bfNameInput" class="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-pink-400">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-700 mb-1">テーマカラー</label>
+                                <select id="bfColorInput" class="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-pink-400">
+                                    <option value="from-rose-400 to-pink-500">スイートピンク</option>
+                                    <option value="from-blue-400 to-indigo-500">クールブルー</option>
+                                    <option value="from-amber-400 to-orange-500">サンシャインオレンジ</option>
+                                    <option value="from-purple-400 to-violet-600">ミステリアスパープル</option>
+                                    <option value="from-emerald-400 to-teal-600">ナチュラルグリーン</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold text-gray-700 mb-1">通話時の声のタイプ（Gemini音声）</label>
+                            <select id="bfVoiceInput" class="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-pink-400">
+                                <option value="Puck">Puck（爽やか・少し高め・元気系）</option>
+                                <option value="Charon">Charon（落ち着いた・知的な低音）</option>
+                                <option value="Fenrir">Fenrir（情熱的・ワイルド・力強い）</option>
+                                <option value="Orus">Orus（誠実・しっかりした大人の声）</option>
+                                <option value="Zephyr">Zephyr（優しい・柔らかめ）</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold text-gray-700 mb-1">
+                                彼氏の性格・設定プロンプト
+                            </label>
+                            <textarea id="bfPromptInput" rows="4" placeholder="彼氏に作ってもらったプロンプトを貼り付け..." class="w-full border border-gray-200 rounded-xl p-3 text-xs focus:outline-none focus:border-pink-400 leading-relaxed"></textarea>
+                        </div>
+
+                        <!-- 彼氏からの自発連絡設定 -->
+                        <div class="bg-pink-50/60 p-3 rounded-2xl border border-pink-100">
+                            <label class="block text-xs font-bold text-pink-800 mb-1">
+                                <i class="fa-regular fa-clock mr-1"></i> アプリ起動中の自動連絡タイマー
+                            </label>
+                            <select id="autoTimerInput" class="w-full bg-white border border-pink-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-pink-400">
+                                <option value="0">オフ（手動ボタンのみで連絡をもらう）</option>
+                                <option value="30">30秒ごとに彼から連絡が来る（お試し用）</option>
+                                <option value="60">1分ごとに彼から連絡が来る</option>
+                                <option value="300">5分ごとに彼から連絡が来る</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- タブ2: Cloudflare Workers 連携ガイド＆URL設定 -->
+                <div id="tabContentWorkers" class="hidden p-5 overflow-y-auto space-y-4 flex-1 text-xs">
+                    <div class="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 space-y-2 text-amber-900">
+                        <h3 class="font-bold flex items-center gap-1.5 text-sm">
+                            <i class="fa-solid fa-cloud-bolt text-amber-500"></i>
+                            Cloudflare Workers と繋ぐとできること
+                        </h3>
+                        <ul class="list-disc pl-4 space-y-1 text-[11px] leading-relaxed">
+                            <li><strong>アプリを閉じていても着信・通知：</strong> Cron Triggersで朝・昼・夜に自動メッセージ＆Web Push通知を送信</li>
+                            <li><strong>記憶の永続化（KV / D1）：</strong> 過去の会話や記念日をWorkers側に保存してスマホ・PCで同期</li>
+                            <li><strong>APIキーの隠蔽：</strong> SecretsにGemini APIキーを保存して安全に利用</li>
+                        </ul>
+                    </div>
+
+                    <div class="space-y-1.5">
+                        <label class="font-bold text-gray-700 block">あなたの Cloudflare Workers エンドポイントURL（任意）</label>
+                        <input type="url" id="workerUrlInput" placeholder="https://my-ai-boyfriend.your-subdomain.workers.dev" class="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500">
+                        <p class="text-[10px] text-gray-400">※設定するとチャット送信時にWorkers経由で履歴保存や通知連携ができるようになります。</p>
+                    </div>
+
+                    <div class="space-y-1.5">
+                        <label class="font-bold text-gray-700 block">あなたの Cloudflare Workers エンドポイントURL</label>
+                        <div class="flex gap-2">
+                            <input type="url" id="workerUrlInput" placeholder="https://my-ai-boyfriend.your-subdomain.workers.dev" class="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500">
+                            <button type="button" onclick="testWorkerConnection()" class="px-3 py-2 bg-amber-500 text-white rounded-xl font-bold text-xs hover:bg-amber-600 transition shrink-0">
+                                接続テスト
+                            </button>
+                        </div>
+                        <p class="text-[10px] text-gray-500">※Worker側の <code>GEMINI_API_KEY</code> と KV (<code>BOYFRIEND_KV</code>) を設定すると、APIキー未入力でも会話＆Cron自動連絡の同期ができます。</p>
+                    </div>
+
+                    <div class="bg-gray-50 border border-gray-200 rounded-2xl p-3.5 space-y-2 text-gray-700">
+                        <h4 class="font-bold text-xs text-gray-800"><i class="fa-solid fa-list-check text-amber-500 mr-1"></i> デプロイ手順メモ</h4>
+                        <ol class="list-decimal pl-4 space-y-1 text-[11px] leading-relaxed">
+                            <li>横のタブ（またはチャット）にある <strong>worker.js</strong> をCloudflare Workersにデプロイ</li>
+                            <li>Workersの <strong>Variables and Secrets</strong> に <code>GEMINI_API_KEY</code> を追加</li>
+                            <li>(任意) KVを作成してバインディング名 <code>BOYFRIEND_KV</code> で紐付け</li>
+                            <li>上のURL欄に発行されたURLを貼って「接続テスト」→「保存」！</li>
+                        </ol>
+                    </div>
+                </div>
+
+                <div class="p-4 border-t border-gray-100 bg-gray-50 flex gap-2">
+                    <button type="button" onclick="deleteCurrentBoyfriend()" id="deleteBfBtn" class="px-4 py-2.5 rounded-xl border border-red-200 text-red-500 text-xs font-bold hover:bg-red-50 transition">
+                        削除
+                    </button>
+                    <button type="button" onclick="saveSettings()" class="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-pink-500 to-rose-500 text-white text-xs font-bold shadow-md hover:opacity-90 transition">
+                        この設定で保存して話す
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========================================== -->
+        <!-- モーダル2: 音声通話 / ビデオ通話画面       -->
+        <!-- ========================================== -->
+        <div id="callModal" class="hidden absolute inset-0 z-50 bg-slate-900 text-white flex flex-col justify-between p-6 overflow-hidden">
+            <!-- ビデオ通話用：彼氏のイラスト全画面背景（画像設定時） -->
+            <img id="callFullBgImage" src="" alt="" class="hidden absolute inset-0 w-full h-full object-cover opacity-55 z-0 transition-transform duration-700">
+            
+            <!-- グラデーションオーバーレイ -->
+            <div id="callBgGradient" class="absolute inset-0 bg-gradient-to-b from-slate-950/70 via-slate-900/50 to-slate-950/90 z-0"></div>
+
+            <!-- ビデオ通話用：自分のカメラ映像（ピクチャーインピクチャー） -->
+            <div id="selfVideoContainer" class="hidden absolute top-16 right-4 w-28 h-40 bg-black rounded-2xl overflow-hidden border-2 border-white/40 shadow-xl z-20">
+                <video id="selfVideo" autoplay playsinline muted class="w-full h-full object-cover transform -scale-x-100"></video>
+                <div class="absolute bottom-1 left-0 right-0 text-center text-[9px] bg-black/50 py-0.5">あなた</div>
+            </div>
+
+            <!-- 上部：通話ステータス -->
+            <div class="relative z-10 text-center mt-4">
+                <span id="callTypeBadge" class="px-3 py-1 rounded-full bg-white/15 text-xs tracking-wider backdrop-blur-md">
+                    音声通話中
+                </span>
+                <h2 id="callBfName" class="text-2xl font-bold mt-3 drop-shadow">レン</h2>
+                <p id="callTimer" class="text-sm text-pink-300 mt-1 font-mono">00:00</p>
+            </div>
+
+            <!-- 中央：彼氏のアバター＆会話字幕 -->
+            <div class="relative z-10 flex flex-col items-center justify-center my-auto">
+                <div id="callCenterAvatarWrapper" class="relative flex items-center justify-center">
+                    <div id="callPulseRing" class="absolute w-36 h-36 rounded-full bg-pink-500/30 pulse-ring"></div>
+                    <div id="callAvatarCircle" class="w-32 h-32 rounded-full bg-gradient-to-tr from-rose-400 to-pink-500 flex items-center justify-center text-4xl font-bold shadow-2xl border-4 border-white/30 avatar-breathe z-10 overflow-hidden">
+                        レン
+                    </div>
+                </div>
+
+                <!-- 彼氏が話している内容の字幕 -->
+                <div class="mt-8 w-full max-w-xs bg-black/45 backdrop-blur-md rounded-2xl p-4 text-center border border-white/15 min-h-[80px] flex flex-col justify-center shadow-lg">
+                    <p id="callSubtitle" class="text-sm leading-relaxed text-white">
+                        「もしもし？どうしたの、声聞きたくなった？」
+                    </p>
+                </div>
+            </div>
+
+            <!-- 下部：通話コントロールボタン -->
+            <div class="relative z-10 space-y-4 mb-2">
+                <div class="flex flex-col items-center">
+                    <button id="micSpeakBtn" onclick="toggleVoiceRecognition()" class="w-16 h-16 rounded-full bg-white text-rose-600 shadow-lg flex items-center justify-center text-2xl hover:scale-105 active:scale-95 transition">
+                        <i id="micIcon" class="fa-solid fa-microphone"></i>
+                    </button>
+                    <span id="micHintText" class="text-xs text-gray-200 mt-2 drop-shadow">マイクを押して話しかける</span>
+                </div>
+
+                <div class="flex items-center justify-center gap-6 pt-2">
+                    <button id="toggleCamBtn" onclick="toggleCameraInCall()" class="hidden w-12 h-12 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center text-lg transition backdrop-blur-xs">
+                        <i class="fa-solid fa-video"></i>
+                    </button>
+                    <button onclick="endCall()" class="w-14 h-14 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center text-xl shadow-lg transition">
+                        <i class="fa-solid fa-phone-slash"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- カスタムメッセージボックス -->
+        <div id="toastMsg" class="hidden absolute bottom-20 left-1/2 transform -translate-x-1/2 z-50 bg-gray-900/90 text-white text-xs px-4 py-2.5 rounded-full shadow-lg transition-opacity duration-300 whitespace-nowrap">
+            保存しました！
+        </div>
+
+    </div>
+
+    <script>
+        // ==========================================
+        // 1. アプリの状態管理（LocalStorage連携）
+        // ==========================================
+        const DEFAULT_BOYFRIENDS = [
+            {
+                id: 'bf_1',
+                name: 'レン',
+                color: 'from-rose-400 to-pink-500',
+                voice: 'Puck',
+                image: '', // Base64画像データ
+                prompt: 'あなたはユーザーの彼氏の「レン」です。少し俺様でツンデレな性格ですが、ユーザーのことが大好きでいつも心配しています。口調は「〜だろ」「〜じゃん」「ちゃんと飯食ったか？」など自然なタメ口で、短めに親しみやすく返信してください。',
+                messages: [
+                    { sender: 'bf', text: 'おっ、やっとアプリ開いたな。今日も一日お疲れさん！何かあったらすぐ話せよ？', time: getCurrentTime() }
+                ]
+            },
+            {
+                id: 'bf_2',
+                name: 'ハルキ',
+                color: 'from-blue-400 to-indigo-500',
+                voice: 'Charon',
+                image: '',
+                prompt: 'あなたはユーザーの年上彼氏の「ハルキ」です。穏やかで優しく、いつも包容力たっぷりに甘やかしてくれます。口調は「〜だね」「〜しようか」「無理しないでね」など、優しく温かいタメ口で話してください。',
+                messages: [
+                    { sender: 'bf', text: 'おかえり。今日もよく頑張ったね。いつでも君の味方だから、ゆっくり話そうか。', time: getCurrentTime() }
+                ]
+            }
+        ];
+
+        let appState = {
+            apiKey: '',
+            workerUrl: '',
+            boyfriends: [],
+            activeBfId: 'bf_1',
+            autoTimerSeconds: 0
+        };
+
+        let autoMessageInterval = null;
+        let callTimerInterval = null;
+        let callSeconds = 0;
+        let currentCallMode = 'voice';
+        let localStream = null;
+        let recognition = null;
+        let isListening = false;
+        let currentAudio = null;
+        let tempUploadedImage = '';
+
+        // ==========================================
+        // 2. 初期化処理
+        // ==========================================
+        window.onload = async function() {
+            loadState();
+            renderHeader();
+            renderChat();
+            setupAutoTimer();
+            initSpeechRecognition();
+            // Workers URLが設定されていれば、Cronで届いた新着メッセージがないか同期チェック
+            if (appState.workerUrl) {
+                await syncFromWorker();
+            }
+        };
+
+        function loadState() {
+            const saved = localStorage.getItem('ai_boyfriend_app_v2');
+            if (saved) {
+                try {
+                    appState = JSON.parse(saved);
+                } catch (e) {
+                    appState.boyfriends = JSON.parse(JSON.stringify(DEFAULT_BOYFRIENDS));
+                }
+            } else {
+                appState.boyfriends = JSON.parse(JSON.stringify(DEFAULT_BOYFRIENDS));
+            }
+            if (!appState.boyfriends || appState.boyfriends.length === 0) {
+                appState.boyfriends = JSON.parse(JSON.stringify(DEFAULT_BOYFRIENDS));
+            }
+            if (!appState.boyfriends.find(b => b.id === appState.activeBfId)) {
+                appState.activeBfId = appState.boyfriends[0].id;
+            }
+        }
+
+        function saveStateToStorage() {
+            try {
+                localStorage.setItem('ai_boyfriend_app_v2', JSON.stringify(appState));
+            } catch (e) {
+                showToast('画像サイズが大きすぎるため一部保存できませんでした');
+            }
+            // Workers URLがある場合はバックグラウンドでKVにも同期保存
+            syncToWorkerBackground();
+        }
+
+        async function syncToWorkerBackground() {
+            const workerUrl = (appState.workerUrl || '').trim().replace(/\/$/, '');
+            if (!workerUrl) return;
+            try {
+                await fetch(`${workerUrl}/save-state`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        activeBfId: appState.activeBfId,
+                        boyfriends: appState.boyfriends
+                    })
+                });
+            } catch (e) {
+                // バックグラウンド同期エラーは静かに無視
+            }
+        }
+
+        async function syncFromWorker() {
+            const workerUrl = (appState.workerUrl || '').trim().replace(/\/$/, '');
+            if (!workerUrl) return;
+            try {
+                const res = await fetch(`${workerUrl}/sync`);
+                const data = await res.json();
+                if (data.synced && data.state && data.state.boyfriends) {
+                    let hasNewCronMsg = false;
+                    data.state.boyfriends.forEach(remoteBf => {
+                        const localBf = appState.boyfriends.find(b => b.id === remoteBf.id);
+                        if (localBf && remoteBf.messages && remoteBf.messages.length > localBf.messages.length) {
+                            const lastRemote = remoteBf.messages[remoteBf.messages.length - 1];
+                            if (lastRemote.fromCron) {
+                                localBf.messages.push({
+                                    sender: lastRemote.sender,
+                                    text: lastRemote.text,
+                                    time: lastRemote.time
+                                });
+                                hasNewCronMsg = true;
+                                if (localBf.id === appState.activeBfId) {
+                                    showNotification(localBf, lastRemote.text);
+                                }
+                            }
+                        }
+                    });
+                    if (hasNewCronMsg) {
+                        localStorage.setItem('ai_boyfriend_app_v2', JSON.stringify(appState));
+                        renderChat();
+                    }
+                }
+            } catch (e) {
+                console.log('Worker sync skipped:', e);
+            }
+        }
+
+        async function testWorkerConnection() {
+            const urlInput = document.getElementById('workerUrlInput').value.trim().replace(/\/$/, '');
+            if (!urlInput) {
+                showToast('WorkersのURLを入力してください');
+                return;
+            }
+            showToast('Workersへ接続テスト中...');
+            try {
+                const res = await fetch(urlInput);
+                const data = await res.json();
+                if (data.status) {
+                    showToast('接続成功！Workersと正常に通信できました！');
+                } else {
+                    showToast('応答はありましたが形式を確認してください');
+                }
+            } catch (e) {
+                showToast('接続エラー：URLやデプロイ状態を確認してね');
+            }
+        }
+
+        // ==========================================
+        // 3. UI描画（ヘッダー・チャット）
+        // ==========================================
+        function renderHeader() {
+            const bf = getActiveBoyfriend();
+            const avatar = document.getElementById('headerAvatar');
+            avatar.className = `w-11 h-11 rounded-full bg-gradient-to-tr ${bf.color} flex items-center justify-center text-white font-bold shadow-sm overflow-hidden`;
+            renderAvatarContent(avatar, bf, 'text-sm');
+
+            document.getElementById('headerName').textContent = bf.name;
+            document.getElementById('typingText').textContent = `${bf.name}が入力中...`;
+        }
+
+        function renderChat() {
+            const bf = getActiveBoyfriend();
+            const container = document.getElementById('chatContainer');
+            container.innerHTML = '';
+
+            bf.messages.forEach(msg => {
+                const isUser = msg.sender === 'user';
+                const wrapper = document.createElement('div');
+                wrapper.className = `flex items-end gap-2 ${isUser ? 'justify-end' : 'justify-start'}`;
+
+                if (!isUser) {
+                    const avatar = document.createElement('div');
+                    avatar.className = `w-8 h-8 rounded-full bg-gradient-to-tr ${bf.color} flex items-center justify-center text-white font-bold shrink-0 mb-1 overflow-hidden shadow-2xs`;
+                    if (bf.image) {
+                        avatar.innerHTML = `<img src="${bf.image}" alt="${bf.name}" class="w-full h-full object-cover">`;
+                    } else {
+                        avatar.innerHTML = `<span class="text-xs">${bf.name.slice(0, 1)}</span>`;
+                    }
+                    wrapper.appendChild(avatar);
+                }
+
+                const bubbleGroup = document.createElement('div');
+                bubbleGroup.className = `flex flex-col ${isUser ? 'items-end' : 'items-start'} max-w-[75%]`;
+
+                const bubble = document.createElement('div');
+                bubble.className = isUser
+                    ? 'bg-gradient-to-r from-pink-500 to-rose-500 text-white px-4 py-2.5 rounded-2xl rounded-br-sm text-sm shadow-xs leading-relaxed whitespace-pre-wrap'
+                    : 'bg-white text-gray-800 border border-pink-100 px-4 py-2.5 rounded-2xl rounded-bl-sm text-sm shadow-xs leading-relaxed whitespace-pre-wrap';
+                bubble.textContent = msg.text;
+
+                const time = document.createElement('span');
+                time.className = 'text-[10px] text-gray-400 mt-1 px-1';
+                time.textContent = msg.time;
+
+                bubbleGroup.appendChild(bubble);
+                bubbleGroup.appendChild(time);
+                wrapper.appendChild(bubbleGroup);
+                container.appendChild(wrapper);
+            });
+
+            container.scrollTop = container.scrollHeight;
+        }
+
+        // ==========================================
+        // 4. Gemini API / Cloudflare Workers 連携
+        // ==========================================
+        async function callGeminiText(userMessage, isProactive = false) {
+            const bf = getActiveBoyfriend();
+            const apiKey = appState.apiKey.trim();
+            const workerUrl = (appState.workerUrl || '').trim();
+
+            if (!apiKey && !workerUrl) {
+                await new Promise(r => setTimeout(r, 900));
+                if (isProactive) {
+                    const demos = [
+                        `なあ、今何してる？ちょっと声聞きたくなって連絡した。`,
+                        `お疲れさま！ちゃんと休憩してるか？無理すんなよ。`,
+                        `ふと君のこと思い出してさ。今日の夜、少し話せる？`
+                    ];
+                    return demos[Math.floor(Math.random() * demos.length)];
+                }
+                return `（※デモモード返信：歯車ボタンからGoogle APIキーかWorkers URLを入れると、設定したプロンプト通りに会話できるよ！）\n「${userMessage}」って言ってくれて嬉しいな！`;
+            }
+
+            const history = bf.messages.slice(-10).map(m => ({
+                role: m.sender === 'user' ? 'user' : 'model',
+                parts: [{ text: m.text }]
+            }));
+
+            const nowStr = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+            let systemInstruction = `${bf.prompt}\n\n【重要ルール】\n・LINEやチャットのような自然な短文（1〜3文程度）で返信してください。\n・現在の時刻は ${nowStr} です。時間帯に合った自然な会話を心がけてください。`;
+
+            const targetUserText = isProactive
+                ? `（システム指示：現在時刻は${nowStr}です。ユーザーから連絡が来る前に、彼氏であるあなたの方から自然に「今何してる？」「お疲れ様」などの気遣いや甘えるメッセージを1通送ってください。システム指示への返事は不要で、彼氏としてのメッセージだけを出力してください。）`
+                : userMessage;
+
+            // Cloudflare Workers URLが設定されている場合はそちらを優先利用（APIキー不要で安全に通信）
+            if (workerUrl) {
+                const cleanUrl = workerUrl.replace(/\/$/, '');
+                try {
+                    const res = await fetch(cleanUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            boyfriendId: bf.id,
+                            prompt: systemInstruction,
+                            message: targetUserText,
+                            history: history
+                        })
+                    });
+                    const data = await res.json();
+                    if (data.error) throw new Error(data.error);
+                    return data.reply || 'Workersからの応答を受信しました';
+                } catch (err) {
+                    return `（Workers通信エラー: ${err.message}）`;
+                }
+            }
+
+            let promptContents = [...history, { role: 'user', parts: [{ text: targetUserText }] }];
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+            const payload = {
+                contents: promptContents,
+                systemInstruction: { parts: [{ text: systemInstruction }] }
+            };
+
+            try {
+                const res = await fetchWithRetry(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (data.error) throw new Error(data.error.message);
+                return data.candidates?.[0]?.content?.parts?.[0]?.text || 'ごめん、ちょっと電波悪かったみたい。もう一回言って？';
+            } catch (err) {
+                return `（通信エラー：APIキーを確認してね！詳細: ${err.message}）`;
+            }
+        }
+
+        async function fetchWithRetry(url, options, retries = 3) {
+            for (let i = 0; i < retries; i++) {
+                const res = await fetch(url, options);
+                if (res.ok || res.status === 400 || res.status === 403) return res;
+                await new Promise(r => setTimeout(r, Math.pow(2, i) * 1000));
+            }
+            return fetch(url, options);
+        }
+
+        async function handleSendMessage(e) {
+            e.preventDefault();
+            const input = document.getElementById('messageInput');
+            const text = input.value.trim();
+            if (!text) return;
+
+            const bf = getActiveBoyfriend();
+            bf.messages.push({ sender: 'user', text: text, time: getCurrentTime() });
+            input.value = '';
+            input.style.height = 'auto';
+            renderChat();
+            saveStateToStorage();
+
+            document.getElementById('typingIndicator').classList.remove('hidden');
+            const replyText = await callGeminiText(text, false);
+            document.getElementById('typingIndicator').classList.add('hidden');
+
+            bf.messages.push({ sender: 'bf', text: replyText, time: getCurrentTime() });
+            renderChat();
+            saveStateToStorage();
+        }
+
+        function handleKeyDown(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSendMessage(e);
+            }
+        }
+
+        // ==========================================
+        // 5. 彼氏からの自発的な連絡機能
+        // ==========================================
+        async function triggerBoyfriendMessage() {
+            const btn = document.getElementById('triggerMsgBtn');
+            btn.disabled = true;
+            btn.classList.add('opacity-50');
+
+            document.getElementById('typingIndicator').classList.remove('hidden');
+            const replyText = await callGeminiText('', true);
+            document.getElementById('typingIndicator').classList.add('hidden');
+
+            const bf = getActiveBoyfriend();
+            bf.messages.push({ sender: 'bf', text: replyText, time: getCurrentTime() });
+            renderChat();
+            saveStateToStorage();
+
+            showNotification(bf, replyText);
+
+            btn.disabled = false;
+            btn.classList.remove('opacity-50');
+        }
+
+        function showNotification(bf, text) {
+            const banner = document.getElementById('notificationBanner');
+            const avatar = document.getElementById('notifAvatar');
+            avatar.className = `w-11 h-11 rounded-full bg-gradient-to-tr ${bf.color} flex items-center justify-center text-white font-bold shrink-0 overflow-hidden`;
+            renderAvatarContent(avatar, bf, 'text-base');
+
+            document.getElementById('notifName').textContent = `${bf.name}からのメッセージ`;
+            document.getElementById('notifText').textContent = text;
+
+            banner.classList.remove('hidden');
+            setTimeout(() => banner.classList.remove('-translate-y-full'), 50);
+            setTimeout(() => dismissNotification(), 5000);
+        }
+
+        function dismissNotification() {
+            const banner = document.getElementById('notificationBanner');
+            banner.classList.add('-translate-y-full');
+            setTimeout(() => banner.classList.add('hidden'), 300);
+        }
+
+        function setupAutoTimer() {
+            if (autoMessageInterval) clearInterval(autoMessageInterval);
+            const sec = parseInt(appState.autoTimerSeconds || 0, 10);
+            const statusEl = document.getElementById('autoMsgStatus');
+
+            if (sec > 0) {
+                statusEl.textContent = `自動連絡: ${sec < 60 ? sec + '秒' : (sec / 60) + '分'}ごと`;
+                autoMessageInterval = setInterval(() => {
+                    if (document.getElementById('callModal').classList.contains('hidden')) {
+                        triggerBoyfriendMessage();
+                    }
+                }, sec * 1000);
+            } else {
+                statusEl.textContent = '自動連絡: オフ';
+            }
+        }
+
+        // ==========================================
+        // 6. 音声通話 & ビデオ通話機能（イラスト反映対応）
+        // ==========================================
+        async function startCall(mode) {
+            currentCallMode = mode;
+            const bf = getActiveBoyfriend();
+            const modal = document.getElementById('callModal');
+            modal.classList.remove('hidden');
+
+            document.getElementById('callBfName').textContent = bf.name;
+            document.getElementById('callTypeBadge').textContent = mode === 'video' ? 'ビデオ通話中' : '音声通話中';
+
+            const avatar = document.getElementById('callAvatarCircle');
+            const fullBgImg = document.getElementById('callFullBgImage');
+            const centerWrapper = document.getElementById('callCenterAvatarWrapper');
+
+            avatar.className = `w-32 h-32 rounded-full bg-gradient-to-tr ${bf.color} flex items-center justify-center text-3xl font-bold shadow-2xl border-4 border-white/30 avatar-breathe z-10 overflow-hidden`;
+            renderAvatarContent(avatar, bf, 'text-3xl');
+
+            // ビデオ通話モード＆彼氏のイラストがある場合は全画面立ち絵風に表示！
+            if (mode === 'video' && bf.image) {
+                fullBgImg.src = bf.image;
+                fullBgImg.classList.remove('hidden');
+                fullBgImg.classList.add('avatar-breathe');
+                centerWrapper.classList.add('hidden');
+            } else {
+                fullBgImg.classList.add('hidden');
+                fullBgImg.classList.remove('avatar-breathe');
+                centerWrapper.classList.remove('hidden');
+            }
+
+            callSeconds = 0;
+            updateCallTimer();
+            callTimerInterval = setInterval(() => {
+                callSeconds++;
+                updateCallTimer();
+            }, 1000);
+
+            const selfVideoContainer = document.getElementById('selfVideoContainer');
+            const toggleCamBtn = document.getElementById('toggleCamBtn');
+            if (mode === 'video') {
+                selfVideoContainer.classList.remove('hidden');
+                toggleCamBtn.classList.remove('hidden');
+                try {
+                    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                    document.getElementById('selfVideo').srcObject = localStream;
+                } catch (e) {
+                    showToast('カメラの許可が得られませんでした');
+                    selfVideoContainer.classList.add('hidden');
+                }
+            } else {
+                selfVideoContainer.classList.add('hidden');
+                toggleCamBtn.classList.add('hidden');
+            }
+
+            const greeting = `もしもし？どうしたの、急に声聞きたくなった？`;
+            document.getElementById('callSubtitle').textContent = `「${greeting}」`;
+            speakWithGeminiTTS(greeting);
+        }
+
+        function updateCallTimer() {
+            const m = Math.floor(callSeconds / 60).toString().padStart(2, '0');
+            const s = (callSeconds % 60).toString().padStart(2, '0');
+            document.getElementById('callTimer').textContent = `${m}:${s}`;
+        }
+
+        function endCall() {
+            document.getElementById('callModal').classList.add('hidden');
+            if (callTimerInterval) clearInterval(callTimerInterval);
+            if (localStream) {
+                localStream.getTracks().forEach(t => t.stop());
+                localStream = null;
+            }
+            if (currentAudio) {
+                currentAudio.pause();
+                currentAudio = null;
+            }
+            if (recognition && isListening) recognition.stop();
+            window.speechSynthesis.cancel();
+        }
+
+        function toggleCameraInCall() {
+            const container = document.getElementById('selfVideoContainer');
+            container.classList.toggle('hidden');
+        }
+
+        function initSpeechRecognition() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) return;
+
+            recognition = new SpeechRecognition();
+            recognition.lang = 'ja-JP';
+            recognition.interimResults = false;
+
+            recognition.onstart = () => {
+                isListening = true;
+                const btn = document.getElementById('micSpeakBtn');
+                btn.classList.remove('bg-white', 'text-rose-600');
+                btn.classList.add('bg-rose-500', 'text-white', 'animate-pulse');
+                document.getElementById('micHintText').textContent = '聞いています... 話しかけてください';
+            };
+
+            recognition.onresult = async (event) => {
+                const spokenText = event.results[0][0].transcript;
+                document.getElementById('callSubtitle').textContent = `あなた: 「${spokenText}」\n（考え中...）`;
+
+                const bf = getActiveBoyfriend();
+                bf.messages.push({ sender: 'user', text: `📞 ${spokenText}`, time: getCurrentTime() });
+
+                const reply = await callGeminiText(spokenText, false);
+                bf.messages.push({ sender: 'bf', text: `📞 ${reply}`, time: getCurrentTime() });
+                saveStateToStorage();
+                renderChat();
+
+                document.getElementById('callSubtitle').textContent = `「${reply}」`;
+                await speakWithGeminiTTS(reply);
+            };
+
+            recognition.onerror = () => {
+                resetMicButton();
+                showToast('音声が聞き取れませんでした。もう一度押してね');
+            };
+
+            recognition.onend = () => resetMicButton();
+        }
+
+        function resetMicButton() {
+            isListening = false;
+            const btn = document.getElementById('micSpeakBtn');
+            btn.classList.add('bg-white', 'text-rose-600');
+            btn.classList.remove('bg-rose-500', 'text-white', 'animate-pulse');
+            document.getElementById('micHintText').textContent = 'マイクを押して話しかける';
+        }
+
+        function toggleVoiceRecognition() {
+            if (!recognition) {
+                showToast('お使いのブラウザは音声入力に対応していません');
+                return;
+            }
+            if (isListening) {
+                recognition.stop();
+            } else {
+                if (currentAudio) currentAudio.pause();
+                window.speechSynthesis.cancel();
+                recognition.start();
+            }
+        }
+
+        async function speakWithGeminiTTS(text) {
+            const apiKey = appState.apiKey.trim();
+            const bf = getActiveBoyfriend();
+            const avatarCircle = document.getElementById('callAvatarCircle');
+
+            if (!apiKey) {
+                const uttr = new SpeechSynthesisUtterance(text);
+                uttr.lang = 'ja-JP';
+                uttr.pitch = 0.95;
+                uttr.onstart = () => avatarCircle.classList.add('talking-active');
+                uttr.onend = () => avatarCircle.classList.remove('talking-active');
+                window.speechSynthesis.speak(uttr);
+                return;
+            }
+
+            try {
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`;
+                const payload = {
+                    contents: [{ parts: [{ text: `日本語で感情を込めて自然に話してください: ${text}` }] }],
+                    generationConfig: {
+                        responseModalities: ["AUDIO"],
+                        speechConfig: {
+                            voiceConfig: { prebuiltVoiceConfig: { voiceName: bf.voice || "Puck" } }
+                        }
+                    },
+                    model: "gemini-2.5-flash-preview-tts"
+                };
+
+                const res = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const result = await res.json();
+                const part = result?.candidates?.[0]?.content?.parts?.[0];
+                const audioData = part?.inlineData?.data;
+                const mimeType = part?.inlineData?.mimeType;
+
+                if (audioData && mimeType && mimeType.startsWith("audio/")) {
+                    const rateMatch = mimeType.match(/rate=(\d+)/);
+                    const sampleRate = rateMatch ? parseInt(rateMatch[1], 10) : 24000;
+                    const pcmBuffer = base64ToArrayBuffer(audioData);
+                    const pcm16 = new Int16Array(pcmBuffer);
+                    const wavBlob = pcmToWav(pcm16, sampleRate);
+                    const audioUrl = URL.createObjectURL(wavBlob);
+
+                    currentAudio = new Audio(audioUrl);
+                    currentAudio.onplay = () => avatarCircle.classList.add('talking-active');
+                    currentAudio.onended = () => avatarCircle.classList.remove('talking-active');
+                    currentAudio.play();
+                }
+            } catch (e) {
+                console.error('TTS Error:', e);
+            }
+        }
+
+        function base64ToArrayBuffer(base64) {
+            const binaryString = atob(base64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) bytes[i] = binaryString.charCodeAt(i);
+            return bytes.buffer;
+        }
+
+        function pcmToWav(pcm16, sampleRate) {
+            const numChannels = 1;
+            const byteRate = sampleRate * numChannels * 2;
+            const blockAlign = numChannels * 2;
+            const dataSize = pcm16.length * 2;
+            const buffer = new ArrayBuffer(44 + dataSize);
+            const view = new DataView(buffer);
+
+            writeString(view, 0, 'RIFF');
+            view.setUint32(4, 36 + dataSize, true);
+            writeString(view, 8, 'WAVE');
+            writeString(view, 12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true);
+            view.setUint16(22, numChannels, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, byteRate, true);
+            view.setUint16(32, blockAlign, true);
+            view.setUint16(34, 16, true);
+            writeString(view, 36, 'data');
+            view.setUint32(40, dataSize, true);
+
+            let offset = 44;
+            for (let i = 0; i < pcm16.length; i++, offset += 2) view.setInt16(offset, pcm16[i], true);
+            return new Blob([buffer], { type: 'audio/wav' });
+        }
+
+        function writeString(view, offset, string) {
+            for (let i = 0; i < string.length; i++) view.setUint8(offset + i, string.charCodeAt(i));
+        }
+
+        // ==========================================
+        // 7. 設定モーダル・イラストアップロード・タブ操作
+        // ==========================================
+        let editingBfId = null;
+
+        function switchSettingsTab(tab) {
+            const tabBf = document.getElementById('tabContentBf');
+            const tabWorkers = document.getElementById('tabContentWorkers');
+            const btnBf = document.getElementById('tabBtnBf');
+            const btnWorkers = document.getElementById('tabBtnWorkers');
+
+            if (tab === 'bf') {
+                tabBf.classList.remove('hidden');
+                tabWorkers.classList.add('hidden');
+                btnBf.className = 'flex-1 py-2.5 text-pink-600 border-b-2 border-pink-500 bg-white';
+                btnWorkers.className = 'flex-1 py-2.5 text-gray-500 hover:text-gray-700';
+            } else {
+                tabBf.classList.add('hidden');
+                tabWorkers.classList.remove('hidden');
+                btnWorkers.className = 'flex-1 py-2.5 text-amber-600 border-b-2 border-amber-500 bg-white';
+                btnBf.className = 'flex-1 py-2.5 text-gray-500 hover:text-gray-700';
+            }
+        }
+
+        function copyWorkerSnippet() {
+            const codeEl = document.getElementById('workerCodeSnippet');
+            if (!codeEl) return;
+            navigator.clipboard.writeText(codeEl.textContent);
+            showToast('Workers用コードをコピーしました！');
+        }
+
+        function openSettingsModal() {
+            editingBfId = appState.activeBfId;
+            document.getElementById('apiKeyInput').value = appState.apiKey || '';
+            document.getElementById('workerUrlInput').value = appState.workerUrl || '';
+            document.getElementById('autoTimerInput').value = appState.autoTimerSeconds || 0;
+            updateApiBadge();
+            renderBoyfriendCards();
+            loadBoyfriendForm(editingBfId);
+            switchSettingsTab('bf');
+            document.getElementById('settingsModal').classList.remove('hidden');
+        }
+
+        function closeSettingsModal() {
+            document.getElementById('settingsModal').classList.add('hidden');
+        }
+
+        function updateApiBadge() {
+            const key = document.getElementById('apiKeyInput').value.trim();
+            const badge = document.getElementById('apiStatusBadge');
+            if (key) {
+                badge.textContent = 'API設定済み';
+                badge.className = 'px-2 py-0.5 rounded-full text-[10px] bg-emerald-100 text-emerald-700 font-bold';
+            } else {
+                badge.textContent = '未設定（デモ動作中）';
+                badge.className = 'px-2 py-0.5 rounded-full text-[10px] bg-gray-200 text-gray-600';
+            }
+        }
+
+        document.getElementById('apiKeyInput').addEventListener('input', updateApiBadge);
+
+        function toggleApiKeyVisibility() {
+            const input = document.getElementById('apiKeyInput');
+            const icon = document.getElementById('eyeIcon');
+            if (input.type === 'password') {
+                input.type = 'text';
+                icon.classList.replace('fa-eye', 'fa-eye-slash');
+            } else {
+                input.type = 'password';
+                icon.classList.replace('fa-eye-slash', 'fa-eye');
+            }
+        }
+
+        // 画像リサイズ＆Base64変換（LocalStorage容量節約のため最大600pxに最適化）
+        function handleImageUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const img = new Image();
+                img.onload = function() {
+                    const canvas = document.createElement('canvas');
+                    const MAX_SIZE = 600;
+                    let width = img.width;
+                    let height = img.height;
+
+                    if (width > height && width > MAX_SIZE) {
+                        height *= MAX_SIZE / width;
+                        width = MAX_SIZE;
+                    } else if (height > MAX_SIZE) {
+                        width *= MAX_SIZE / height;
+                        height = MAX_SIZE;
+                    }
+
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+
+                    tempUploadedImage = canvas.toDataURL('image/jpeg', 0.85);
+                    updatePreviewAvatar();
+                    showToast('イラストを読み込みました！');
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function removeBoyfriendImage() {
+            tempUploadedImage = '';
+            document.getElementById('bfImageUpload').value = '';
+            updatePreviewAvatar();
+        }
+
+        function updatePreviewAvatar() {
+            const box = document.getElementById('previewAvatarBox');
+            const removeBtn = document.getElementById('removeImgBtn');
+            const name = document.getElementById('bfNameInput').value.trim() || '彼氏';
+            const color = document.getElementById('bfColorInput').value;
+
+            box.className = `w-16 h-16 rounded-2xl bg-gradient-to-tr ${color} flex items-center justify-center text-white font-bold text-xl shrink-0 overflow-hidden shadow-sm border-2 border-white`;
+
+            if (tempUploadedImage) {
+                box.innerHTML = `<img src="${tempUploadedImage}" class="w-full h-full object-cover">`;
+                removeBtn.classList.remove('hidden');
+            } else {
+                box.innerHTML = `<span>${name.slice(0, 2)}</span>`;
+                removeBtn.classList.add('hidden');
+            }
+        }
+
+        document.getElementById('bfNameInput').addEventListener('input', updatePreviewAvatar);
+        document.getElementById('bfColorInput').addEventListener('change', updatePreviewAvatar);
+
+        function renderBoyfriendCards() {
+            const list = document.getElementById('boyfriendList');
+            list.innerHTML = '';
+
+            appState.boyfriends.forEach(bf => {
+                const isSelected = bf.id === editingBfId;
+                const card = document.createElement('button');
+                card.type = 'button';
+                card.onclick = () => {
+                    saveCurrentFormTemp();
+                    editingBfId = bf.id;
+                    renderBoyfriendCards();
+                    loadBoyfriendForm(bf.id);
+                };
+                card.className = `p-2 rounded-2xl border text-center transition flex flex-col items-center gap-1 ${
+                    isSelected ? 'border-pink-500 bg-pink-50 shadow-xs' : 'border-gray-200 bg-white hover:bg-gray-50'
+                }`;
+
+                const avatarHtml = bf.image
+                    ? `<img src="${bf.image}" class="w-full h-full object-cover">`
+                    : `<span>${bf.name.slice(0, 1)}</span>`;
+
+                card.innerHTML = `
+                    <div class="w-10 h-10 rounded-full bg-gradient-to-tr ${bf.color} text-white font-bold text-xs flex items-center justify-center overflow-hidden">
+                        ${avatarHtml}
+                    </div>
+                    <span class="text-xs font-bold text-gray-800 truncate w-full">${bf.name}</span>
+                `;
+                list.appendChild(card);
+            });
+
+            document.getElementById('deleteBfBtn').style.display = appState.boyfriends.length > 1 ? 'block' : 'none';
+        }
+
+        function loadBoyfriendForm(id) {
+            const bf = appState.boyfriends.find(b => b.id === id);
+            if (!bf) return;
+            document.getElementById('bfNameInput').value = bf.name;
+            document.getElementById('bfColorInput').value = bf.color;
+            document.getElementById('bfVoiceInput').value = bf.voice || 'Puck';
+            document.getElementById('bfPromptInput').value = bf.prompt;
+            tempUploadedImage = bf.image || '';
+            updatePreviewAvatar();
+        }
+
+        function saveCurrentFormTemp() {
+            const bf = appState.boyfriends.find(b => b.id === editingBfId);
+            if (!bf) return;
+            bf.name = document.getElementById('bfNameInput').value.trim() || '彼氏';
+            bf.color = document.getElementById('bfColorInput').value;
+            bf.voice = document.getElementById('bfVoiceInput').value;
+            bf.prompt = document.getElementById('bfPromptInput').value.trim();
+            bf.image = tempUploadedImage;
+        }
+
+        function createNewBoyfriend() {
+            saveCurrentFormTemp();
+            const newId = 'bf_' + Date.now();
+            const newBf = {
+                id: newId,
+                name: '新しい彼氏',
+                color: 'from-purple-400 to-violet-600',
+                voice: 'Fenrir',
+                image: '',
+                prompt: 'あなたはユーザーの優しい彼氏です。ユーザーのことが大好きで、いつも寄り添ってくれます。自然なタメ口で話してください。',
+                messages: [
+                    { sender: 'bf', text: 'はじめまして！これからたくさん話そうね。', time: getCurrentTime() }
+                ]
+            };
+            appState.boyfriends.push(newBf);
+            editingBfId = newId;
+            renderBoyfriendCards();
+            loadBoyfriendForm(newId);
+        }
+
+        function deleteCurrentBoyfriend() {
+            if (appState.boyfriends.length <= 1) return;
+            appState.boyfriends = appState.boyfriends.filter(b => b.id !== editingBfId);
+            editingBfId = appState.boyfriends[0].id;
+            appState.activeBfId = editingBfId;
+            renderBoyfriendCards();
+            loadBoyfriendForm(editingBfId);
+        }
+
+        function saveSettings() {
+            saveCurrentFormTemp();
+            appState.apiKey = document.getElementById('apiKeyInput').value.trim();
+            appState.workerUrl = document.getElementById('workerUrlInput').value.trim();
+            appState.autoTimerSeconds = parseInt(document.getElementById('autoTimerInput').value, 10);
+            appState.activeBfId = editingBfId;
+
+            saveStateToStorage();
+            renderHeader();
+            renderChat();
+            setupAutoTimer();
+            closeSettingsModal();
+            showToast('設定を保存しました！');
+        }
+
+        // ==========================================
+        // 8. 共通ユーティリティ関数
+        // ==========================================
+        function getActiveBoyfriend() {
+            return appState.boyfriends.find(b => b.id === appState.activeBfId) || appState.boyfriends[0];
+        }
+
+        function renderAvatarContent(container, bf, textSizeClass) {
+            if (bf.image) {
+                container.innerHTML = `<img src="${bf.image}" alt="${bf.name}" class="w-full h-full object-cover">`;
+            } else {
+                container.innerHTML = `<span class="${textSizeClass}">${bf.name.slice(0, 2)}</span>`;
+            }
+        }
+
+        function getCurrentTime() {
+            const now = new Date();
+            return now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('toastMsg');
+            toast.textContent = msg;
+            toast.classList.remove('hidden');
+            setTimeout(() => toast.classList.add('hidden'), 2800);
+        }
+    </script>
+</body>
+</html>
