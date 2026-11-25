@@ -60,17 +60,17 @@ export default {
         return jsonResponse({ saved: true });
       }
 
-      // 【API 4】チャット返信・自発メッセージ生成（/api/chat で確実に処理）
+      // 【API 4】チャット返信・自発メッセージ生成（写真認識にも対応）
       if (request.method === "POST" && (url.pathname === "/api/chat" || url.pathname === "/")) {
         const body = await request.json();
-        const { apiKey, prompt, message, history = [] } = body;
+        const { apiKey, prompt, message, image, history = [] } = body;
         const effectiveApiKey = env.GEMINI_API_KEY || (apiKey ? apiKey.trim() : "");
 
         if (!effectiveApiKey) {
           return jsonResponse({ error: "APIキーが未設定です。アプリ設定画面またはWorkersのSecretsにGEMINI_API_KEYを設定してください" }, 500);
         }
 
-        const geminiReply = await generateGeminiReply(effectiveApiKey, prompt, message, history);
+        const geminiReply = await generateGeminiReply(effectiveApiKey, prompt, message, history, image);
         return jsonResponse({ reply: geminiReply });
       }
 
@@ -112,23 +112,23 @@ export default {
     const systemInstruction = `${activeBf.prompt}\n\n【重要ルール】\n・LINEのような自然な短文（1〜2文）で返信してください。\n・現在の日本時間は ${timeStr} です。`;
     const triggerPrompt = `（システム指示：現在時刻は${timeStr}です。ユーザーから連絡が来る前に、彼氏であるあなたの方から時間帯に合った自然なメッセージ（「おはよう」「お昼食べた？」「お疲れ様」「そろそろ寝る？」など）を1通送ってください。メッセージ本文のみ出力してください。）`;
 
-    const replyText = await generateGeminiReply(env.GEMINI_API_KEY, systemInstruction, triggerPrompt, history);
-
-    activeBf.messages.push({
-      sender: "bf",
-      text: replyText,
-      time: timeStr,
-      fromCron: true
-    });
-
-    await env.BOYFRIEND_KV.put("app_state", JSON.stringify(state));
-  }
-};
-
-async function generateGeminiReply(apiKey, systemPrompt, userMessage, history) {
+async function generateGeminiReply(apiKey, systemPrompt, userMessage, history, imageBase64 = "") {
   const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+
+  const userParts = [{ text: userMessage }];
+  if (imageBase64 && imageBase64.includes(",")) {
+    const [meta, dataPart] = imageBase64.split(",");
+    const mimeMatch = meta.match(/data:(.*?);base64/);
+    userParts.push({
+      inlineData: {
+        mimeType: mimeMatch ? mimeMatch[1] : "image/jpeg",
+        data: dataPart
+      }
+    });
+  }
+
   const payload = {
-    contents: [...history, { role: "user", parts: [{ text: userMessage }] }],
+    contents: [...history, { role: "user", parts: userParts }],
     systemInstruction: {
       parts: [{ text: systemPrompt }]
     }
