@@ -1,10 +1,6 @@
 name = "always-with-you"
 main = "worker.js"
 compatibility_date = "2024-11-01"
-同じフォルダにある index.html を画面として配信する設定
 [assets]
 directory = "./"
 binding = "ASSETS"
-定期連絡（Cron）を使う場合の例（UTC時間なので 23:00 = 日本時間 朝8:00）
-[triggers]
-crons = ["0 23 * * *"]
