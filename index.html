@@ -283,12 +283,12 @@
                     <div class="space-y-1.5">
                         <label class="font-bold text-gray-700 block">あなたの Cloudflare Workers エンドポイントURL</label>
                         <div class="flex gap-2">
-                            <input type="url" id="workerUrlInput" placeholder="https://my-ai-boyfriend.your-subdomain.workers.dev" class="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500">
+                            <input type="url" id="workerUrlInput" placeholder="https://always-with-you.your-name.workers.dev" class="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500">
                             <button type="button" onclick="testWorkerConnection()" class="px-3 py-2 bg-amber-500 text-white rounded-xl font-bold text-xs hover:bg-amber-600 transition shrink-0">
                                 接続テスト
                             </button>
                         </div>
-                        <p class="text-[10px] text-gray-500">※Worker側の <code>GEMINI_API_KEY</code> と KV (<code>BOYFRIEND_KV</code>) を設定すると、APIキー未入力でも会話＆Cron自動連絡の同期ができます。</p>
+                        <p class="text-[10px] text-gray-500">※同じWorkersドメイン上で開いている場合は空欄でも自動接続します。</p>
                     </div>
 
                     <div class="bg-gray-50 border border-gray-200 rounded-2xl p-3.5 space-y-2 text-gray-700">
@@ -392,7 +392,7 @@
                 name: 'レン',
                 color: 'from-rose-400 to-pink-500',
                 voice: 'Puck',
-                image: '', // Base64画像データ
+                image: '',
                 prompt: 'あなたはユーザーの彼氏の「レン」です。少し俺様でツンデレな性格ですが、ユーザーのことが大好きでいつも心配しています。口調は「〜だろ」「〜じゃん」「ちゃんと飯食ったか？」など自然なタメ口で、短めに親しみやすく返信してください。',
                 messages: [
                     { sender: 'bf', text: 'おっ、やっとアプリ開いたな。今日も一日お疲れさん！何かあったらすぐ話せよ？', time: getCurrentTime() }
@@ -438,8 +438,7 @@
             renderChat();
             setupAutoTimer();
             initSpeechRecognition();
-            // Workers URLが設定されていれば、Cronで届いた新着メッセージがないか同期チェック
-            if (appState.workerUrl) {
+            if (getEffectiveWorkerUrl()) {
                 await syncFromWorker();
             }
         };
@@ -469,20 +468,27 @@
             } catch (e) {
                 showToast('画像サイズが大きすぎるため一部保存できませんでした');
             }
-            // Workers URLがある場合はバックグラウンドでKVにも同期保存
             syncToWorkerBackground();
         }
 
-        // URLの空白・改行・全角文字・末尾スラッシュを安全にお掃除する関数
         function sanitizeWorkerUrl(rawUrl) {
             if (!rawUrl) return '';
             return rawUrl
-                .replace(/[\s\u3000\r\n]+/g, '') // 半角/全角スペース・改行を全除去
-                .replace(/\/+$/, '');             // 末尾のスラッシュを除去
+                .replace(/[\s\u3000\r\n]+/g, '')
+                .replace(/\/+$/, '');
+        }
+
+        function getEffectiveWorkerUrl() {
+            const configured = sanitizeWorkerUrl(appState.workerUrl);
+            if (configured) return configured;
+            if (window.location.hostname.endsWith('.workers.dev')) {
+                return window.location.origin;
+            }
+            return '';
         }
 
         async function syncToWorkerBackground() {
-            const workerUrl = sanitizeWorkerUrl(appState.workerUrl);
+            const workerUrl = getEffectiveWorkerUrl();
             if (!workerUrl) return;
             try {
                 await fetch(`${workerUrl}/api/save-state`, {
@@ -494,75 +500,66 @@
                     })
                 });
             } catch (e) {
-                // バックグラウンド同期エラーは静かに無視
+                console.warn('Worker sync save skipped:', e);
             }
         }
 
         async function syncFromWorker() {
-            const workerUrl = sanitizeWorkerUrl(appState.workerUrl);
+            const workerUrl = getEffectiveWorkerUrl();
             if (!workerUrl) return;
             try {
                 const res = await fetch(`${workerUrl}/api/sync`);
+                if (!res.ok) return;
                 const data = await res.json();
                 if (data.synced && data.state && data.state.boyfriends) {
-                    let hasNewCronMsg = false;
+                    let hasNewFromCron = false;
                     data.state.boyfriends.forEach(remoteBf => {
                         const localBf = appState.boyfriends.find(b => b.id === remoteBf.id);
                         if (localBf && remoteBf.messages && remoteBf.messages.length > localBf.messages.length) {
-                            const lastRemote = remoteBf.messages[remoteBf.messages.length - 1];
-                            if (lastRemote.fromCron) {
-                                localBf.messages.push({
-                                    sender: lastRemote.sender,
-                                    text: lastRemote.text,
-                                    time: lastRemote.time
-                                });
-                                hasNewCronMsg = true;
-                                if (localBf.id === appState.activeBfId) {
-                                    showNotification(localBf, lastRemote.text);
-                                }
-                            }
+                            const newMsgs = remoteBf.messages.slice(localBf.messages.length);
+                            localBf.messages.push(...newMsgs);
+                            hasNewFromCron = true;
                         }
                     });
-                    if (hasNewCronMsg) {
+                    if (hasNewFromCron) {
                         localStorage.setItem('ai_boyfriend_app_v2', JSON.stringify(appState));
                         renderChat();
+                        const bf = getActiveBoyfriend();
+                        const lastMsg = bf.messages[bf.messages.length - 1];
+                        if (lastMsg && lastMsg.sender === 'bf') {
+                            showNotificationBanner(bf, lastMsg.text);
+                        }
                     }
                 }
             } catch (e) {
-                console.log('Worker sync skipped:', e);
+                console.warn('Worker sync fetch skipped:', e);
             }
         }
 
-        async function testWorkerConnection() {
-            const rawInput = document.getElementById('workerUrlInput').value;
-            const urlInput = sanitizeWorkerUrl(rawInput);
-            document.getElementById('workerUrlInput').value = urlInput;
-            if (!urlInput) {
-                showToast('WorkersのURLを入力してください');
-                return;
-            }
-            showToast('Workersへ接続テスト中...');
-            try {
-                const res = await fetch(`${urlInput}/api/health`);
-                const data = await res.json();
-                if (data.status) {
-                    showToast('接続成功！Workersと正常に通信できました！');
-                } else {
-                    showToast('応答はありましたが形式を確認してください');
-                }
-            } catch (e) {
-                showToast('接続エラー：URLやデプロイ状態を確認してね');
-            }
+        function getActiveBoyfriend() {
+            return appState.boyfriends.find(b => b.id === appState.activeBfId) || appState.boyfriends[0];
+        }
+
+        function getCurrentTime() {
+            const now = new Date();
+            return now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
         }
 
         // ==========================================
-        // 3. UI描画（ヘッダー・チャット）
+        // 3. UI描画処理（画像アイコン対応）
         // ==========================================
+        function renderAvatarInner(bf) {
+            if (bf.image) {
+                return `<img src="${bf.image}" alt="${escapeHtml(bf.name)}" class="w-full h-full object-cover">`;
+            }
+            return escapeHtml(bf.name.slice(0, 2));
+        }
+
         function renderHeader() {
             const bf = getActiveBoyfriend();
-            const avatar = document.getElementById('headerAvatar');
-            avatar.className = `w-11 h-11 rounded-full bg-gradient-to-tr ${bf.color} flex items-center justify-center text-white font-bold shadow-sm overflow-hidden`;
-            renderAvatarContent(avatar, bf, 'text-sm');
+            const headerAvatar = document.getElementById('headerAvatar');
+            headerAvatar.className = `w-11 h-11 rounded-full bg-gradient-to-tr ${bf.color} flex items-center justify-center text-white font-bold text-sm shadow-sm overflow-hidden`;
+            headerAvatar.innerHTML = renderAvatarInner(bf);
 
             document.getElementById('headerName').textContent = bf.name;
             document.getElementById('typingText').textContent = `${bf.name}が入力中...`;
@@ -574,131 +571,45 @@
             container.innerHTML = '';
 
             bf.messages.forEach(msg => {
-                const isUser = msg.sender === 'user';
                 const wrapper = document.createElement('div');
-                wrapper.className = `flex items-end gap-2 ${isUser ? 'justify-end' : 'justify-start'}`;
-
-                if (!isUser) {
-                    const avatar = document.createElement('div');
-                    avatar.className = `w-8 h-8 rounded-full bg-gradient-to-tr ${bf.color} flex items-center justify-center text-white font-bold shrink-0 mb-1 overflow-hidden shadow-2xs`;
-                    if (bf.image) {
-                        avatar.innerHTML = `<img src="${bf.image}" alt="${bf.name}" class="w-full h-full object-cover">`;
-                    } else {
-                        avatar.innerHTML = `<span class="text-xs">${bf.name.slice(0, 1)}</span>`;
-                    }
-                    wrapper.appendChild(avatar);
+                if (msg.sender === 'user') {
+                    wrapper.className = 'flex flex-col items-end';
+                    wrapper.innerHTML = `
+                        <div class="max-w-[78%] bg-gradient-to-r from-pink-500 to-rose-500 text-white px-4 py-2.5 rounded-2xl rounded-br-sm shadow-sm text-sm leading-relaxed whitespace-pre-wrap">${escapeHtml(msg.text)}</div>
+                        <span class="text-[10px] text-gray-400 mt-1 mr-1">${msg.time}</span>
+                    `;
+                } else {
+                    wrapper.className = 'flex items-end gap-2';
+                    wrapper.innerHTML = `
+                        <div class="w-8 h-8 rounded-full bg-gradient-to-tr ${bf.color} flex items-center justify-center text-white font-bold text-xs shrink-0 shadow-xs overflow-hidden">
+                            ${renderAvatarInner(bf)}
+                        </div>
+                        <div class="flex flex-col items-start max-w-[78%]">
+                            <div class="bg-white border border-pink-100 text-gray-800 px-4 py-2.5 rounded-2xl rounded-bl-sm shadow-xs text-sm leading-relaxed whitespace-pre-wrap">${escapeHtml(msg.text)}</div>
+                            <span class="text-[10px] text-gray-400 mt-1 ml-1">${msg.time}</span>
+                        </div>
+                    `;
                 }
-
-                const bubbleGroup = document.createElement('div');
-                bubbleGroup.className = `flex flex-col ${isUser ? 'items-end' : 'items-start'} max-w-[75%]`;
-
-                const bubble = document.createElement('div');
-                bubble.className = isUser
-                    ? 'bg-gradient-to-r from-pink-500 to-rose-500 text-white px-4 py-2.5 rounded-2xl rounded-br-sm text-sm shadow-xs leading-relaxed whitespace-pre-wrap'
-                    : 'bg-white text-gray-800 border border-pink-100 px-4 py-2.5 rounded-2xl rounded-bl-sm text-sm shadow-xs leading-relaxed whitespace-pre-wrap';
-                bubble.textContent = msg.text;
-
-                const time = document.createElement('span');
-                time.className = 'text-[10px] text-gray-400 mt-1 px-1';
-                time.textContent = msg.time;
-
-                bubbleGroup.appendChild(bubble);
-                bubbleGroup.appendChild(time);
-                wrapper.appendChild(bubbleGroup);
                 container.appendChild(wrapper);
             });
 
             container.scrollTop = container.scrollHeight;
         }
 
-        // ==========================================
-        // 4. Gemini API / Cloudflare Workers 連携
-        // ==========================================
-        async function callGeminiText(userMessage, isProactive = false) {
-            const bf = getActiveBoyfriend();
-            const apiKey = appState.apiKey.trim();
-            const workerUrl = sanitizeWorkerUrl(appState.workerUrl);
-
-            if (!apiKey && !workerUrl) {
-                await new Promise(r => setTimeout(r, 900));
-                if (isProactive) {
-                    const demos = [
-                        `なあ、今何してる？ちょっと声聞きたくなって連絡した。`,
-                        `お疲れさま！ちゃんと休憩してるか？無理すんなよ。`,
-                        `ふと君のこと思い出してさ。今日の夜、少し話せる？`
-                    ];
-                    return demos[Math.floor(Math.random() * demos.length)];
-                }
-                return `（※デモモード返信：歯車ボタンからGoogle APIキーかWorkers URLを入れると、設定したプロンプト通りに会話できるよ！）\n「${userMessage}」って言ってくれて嬉しいな！`;
-            }
-
-            const history = bf.messages.slice(-10).map(m => ({
-                role: m.sender === 'user' ? 'user' : 'model',
-                parts: [{ text: m.text }]
-            }));
-
-            const nowStr = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
-            let systemInstruction = `${bf.prompt}\n\n【重要ルール】\n・LINEやチャットのような自然な短文（1〜3文程度）で返信してください。\n・現在の時刻は ${nowStr} です。時間帯に合った自然な会話を心がけてください。`;
-
-            const targetUserText = isProactive
-                ? `（システム指示：現在時刻は${nowStr}です。ユーザーから連絡が来る前に、彼氏であるあなたの方から自然に「今何してる？」「お疲れ様」などの気遣いや甘えるメッセージを1通送ってください。システム指示への返事は不要で、彼氏としてのメッセージだけを出力してください。）`
-                : userMessage;
-
-            // Cloudflare Workers URLが設定されている場合は /api/chat へ送信（Assetsルーティングと競合しない専用パス）
-            if (workerUrl) {
-                try {
-                    const res = await fetch(`${workerUrl}/api/chat`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            boyfriendId: bf.id,
-                            prompt: systemInstruction,
-                            message: targetUserText,
-                            history: history
-                        })
-                    });
-                    const rawText = await res.text();
-                    let data;
-                    try {
-                        data = JSON.parse(rawText);
-                    } catch (parseErr) {
-                        throw new Error(`サーバー応答形式エラー (Status ${res.status})`);
-                    }
-                    if (data.error) throw new Error(data.error);
-                    return data.reply || 'Workersからの応答を受信しました';
-                } catch (err) {
-                    return `（Workers通信エラー: ${err.message}）`;
-                }
-            }
-
-            let promptContents = [...history, { role: 'user', parts: [{ text: targetUserText }] }];
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
-            const payload = {
-                contents: promptContents,
-                systemInstruction: { parts: [{ text: systemInstruction }] }
-            };
-
-            try {
-                const res = await fetchWithRetry(url, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                const data = await res.json();
-                if (data.error) throw new Error(data.error.message);
-                return data.candidates?.[0]?.content?.parts?.[0]?.text || 'ごめん、ちょっと電波悪かったみたい。もう一回言って？';
-            } catch (err) {
-                return `（通信エラー：APIキーを確認してね！詳細: ${err.message}）`;
-            }
+        function escapeHtml(str) {
+            return String(str).replace(/[&<>"']/g, function(m) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m];
+            });
         }
 
-        async function fetchWithRetry(url, options, retries = 3) {
-            for (let i = 0; i < retries; i++) {
-                const res = await fetch(url, options);
-                if (res.ok || res.status === 400 || res.status === 403) return res;
-                await new Promise(r => setTimeout(r, Math.pow(2, i) * 1000));
+        // ==========================================
+        // 4. チャット送信 & Gemini API / Workers 連携
+        // ==========================================
+        function handleKeyDown(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSendMessage(e);
             }
-            return fetch(url, options);
         }
 
         async function handleSendMessage(e) {
@@ -710,88 +621,194 @@
             const bf = getActiveBoyfriend();
             bf.messages.push({ sender: 'user', text: text, time: getCurrentTime() });
             input.value = '';
-            input.style.height = 'auto';
             renderChat();
             saveStateToStorage();
 
-            document.getElementById('typingIndicator').classList.remove('hidden');
-            const replyText = await callGeminiText(text, false);
-            document.getElementById('typingIndicator').classList.add('hidden');
+            showTyping(true);
+            const reply = await callGeminiText(text, false);
+            showTyping(false);
 
-            bf.messages.push({ sender: 'bf', text: replyText, time: getCurrentTime() });
+            bf.messages.push({ sender: 'bf', text: reply, time: getCurrentTime() });
             renderChat();
             saveStateToStorage();
         }
 
-        function handleKeyDown(e) {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleSendMessage(e);
+        function showTyping(show) {
+            const indicator = document.getElementById('typingIndicator');
+            if (show) {
+                indicator.classList.remove('hidden');
+            } else {
+                indicator.classList.add('hidden');
+            }
+        }
+
+        async function callGeminiText(userMessage, isProactive = false) {
+            const bf = getActiveBoyfriend();
+            const apiKey = appState.apiKey.trim();
+            const workerUrl = getEffectiveWorkerUrl();
+
+            if (!apiKey && !workerUrl) {
+                await new Promise(r => setTimeout(r, 900));
+                if (isProactive) {
+                    const demos = [
+                        `ねえ、今何してる？ちょっと${bf.name}のこと思い出してよ！`,
+                        `お疲れさま！ちゃんと休憩してるか？無理しすぎるなよ？`,
+                        `なんか急に声聞きたくなったわ。あとで電話してもいい？`
+                    ];
+                    return demos[Math.floor(Math.random() * demos.length)];
+                }
+                return `「${userMessage}」かぁ、なるほどね！（※右上の歯車ボタンからGemini APIキーまたはWorkers URLを設定すると、本格的なAI彼氏として返事するよ！）`;
+            }
+
+            const recentHistory = bf.messages.slice(-10).map(m => ({
+                role: m.sender === 'user' ? 'user' : 'model',
+                parts: [{ text: m.text }]
+            }));
+
+            const systemInstruction = `${bf.prompt}\n\n【重要ルール】\n・LINEやチャットアプリのような自然な短文（1〜3文程度）で返信してください。\n・AIやアシスタントとしての発言は絶対に出さず、完全に「彼氏」として振る舞ってください。`;
+            const finalUserPrompt = isProactive
+                ? '（システム指示：今、ユーザーから連絡が来る前に、彼氏であるあなたの方から自然な日常のメッセージや気遣いのLINEを1通送ってください。メッセージ本文のみを出力してください。）'
+                : userMessage;
+
+            if (workerUrl) {
+                try {
+                    const res = await fetch(`${workerUrl}/api/chat`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            prompt: systemInstruction,
+                            message: finalUserPrompt,
+                            history: isProactive ? recentHistory : recentHistory.slice(0, -1)
+                        })
+                    });
+                    if (!res.ok) {
+                        const errText = await res.text();
+                        throw new Error(`HTTP ${res.status}: ${errText}`);
+                    }
+                    const data = await res.json();
+                    if (data.error) throw new Error(data.error);
+                    return data.reply || 'ごめん、ちょっとうまく聞き取れなかった！';
+                } catch (err) {
+                    console.error('Workers Error:', err);
+                    return `（Workers通信エラー: ${err.message}）`;
+                }
+            }
+
+            try {
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`;
+                const contents = isProactive
+                    ? [...recentHistory, { role: 'user', parts: [{ text: finalUserPrompt }] }]
+                    : recentHistory;
+
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: contents,
+                        systemInstruction: {
+                            parts: [{ text: systemInstruction }]
+                        }
+                    })
+                });
+
+                const data = await response.json();
+                if (data.error) {
+                    throw new Error(data.error.message);
+                }
+                return data.candidates?.[0]?.content?.parts?.[0]?.text || 'ごめん、ちょっと電波悪かったみたい！もう一回言って？';
+            } catch (err) {
+                console.error(err);
+                return `（通信エラー: ${err.message}。APIキーを確認してね！）`;
             }
         }
 
         // ==========================================
-        // 5. 彼氏からの自発的な連絡機能
+        // 5. 彼氏からの自発メッセージ & 通知機能
         // ==========================================
-        async function triggerBoyfriendMessage() {
-            const btn = document.getElementById('triggerMsgBtn');
-            btn.disabled = true;
-            btn.classList.add('opacity-50');
-
-            document.getElementById('typingIndicator').classList.remove('hidden');
-            const replyText = await callGeminiText('', true);
-            document.getElementById('typingIndicator').classList.add('hidden');
-
-            const bf = getActiveBoyfriend();
-            bf.messages.push({ sender: 'bf', text: replyText, time: getCurrentTime() });
-            renderChat();
-            saveStateToStorage();
-
-            showNotification(bf, replyText);
-
-            btn.disabled = false;
-            btn.classList.remove('opacity-50');
-        }
-
-        function showNotification(bf, text) {
-            const banner = document.getElementById('notificationBanner');
-            const avatar = document.getElementById('notifAvatar');
-            avatar.className = `w-11 h-11 rounded-full bg-gradient-to-tr ${bf.color} flex items-center justify-center text-white font-bold shrink-0 overflow-hidden`;
-            renderAvatarContent(avatar, bf, 'text-base');
-
-            document.getElementById('notifName').textContent = `${bf.name}からのメッセージ`;
-            document.getElementById('notifText').textContent = text;
-
-            banner.classList.remove('hidden');
-            setTimeout(() => banner.classList.remove('-translate-y-full'), 50);
-            setTimeout(() => dismissNotification(), 5000);
-        }
-
-        function dismissNotification() {
-            const banner = document.getElementById('notificationBanner');
-            banner.classList.add('-translate-y-full');
-            setTimeout(() => banner.classList.add('hidden'), 300);
-        }
-
         function setupAutoTimer() {
             if (autoMessageInterval) clearInterval(autoMessageInterval);
             const sec = parseInt(appState.autoTimerSeconds || 0, 10);
-            const statusEl = document.getElementById('autoMsgStatus');
+            const statusLabel = document.getElementById('autoMsgStatus');
 
             if (sec > 0) {
-                statusEl.textContent = `自動連絡: ${sec < 60 ? sec + '秒' : (sec / 60) + '分'}ごと`;
+                statusLabel.textContent = `自動連絡: ${sec}秒ごとON`;
                 autoMessageInterval = setInterval(() => {
                     if (document.getElementById('callModal').classList.contains('hidden')) {
                         triggerBoyfriendMessage();
                     }
                 }, sec * 1000);
             } else {
-                statusEl.textContent = '自動連絡: オフ';
+                statusLabel.textContent = '自動連絡: オフ';
             }
         }
 
+        async function triggerBoyfriendMessage() {
+            const btn = document.getElementById('triggerMsgBtn');
+            btn.disabled = true;
+            btn.classList.add('opacity-50');
+
+            showTyping(true);
+            const proactiveText = await callGeminiText('', true);
+            showTyping(false);
+
+            const bf = getActiveBoyfriend();
+            bf.messages.push({ sender: 'bf', text: proactiveText, time: getCurrentTime() });
+            renderChat();
+            saveStateToStorage();
+
+            showNotificationBanner(bf, proactiveText);
+            playNotificationChime();
+
+            btn.disabled = false;
+            btn.classList.remove('opacity-50');
+        }
+
+        function showNotificationBanner(bf, text) {
+            const banner = document.getElementById('notificationBanner');
+            const avatar = document.getElementById('notifAvatar');
+            avatar.className = `w-11 h-11 rounded-full bg-gradient-to-tr ${bf.color} flex items-center justify-center text-white font-bold text-sm shrink-0 overflow-hidden`;
+            avatar.innerHTML = renderAvatarInner(bf);
+
+            document.getElementById('notifName').textContent = bf.name;
+            document.getElementById('notifText').textContent = text;
+
+            banner.classList.remove('hidden');
+            setTimeout(() => {
+                banner.classList.remove('-translate-y-full');
+            }, 20);
+
+            setTimeout(() => {
+                dismissNotification();
+            }, 5000);
+        }
+
+        function dismissNotification() {
+            const banner = document.getElementById('notificationBanner');
+            banner.classList.add('-translate-y-full');
+            setTimeout(() => {
+                banner.classList.add('hidden');
+            }, 300);
+        }
+
+        function playNotificationChime() {
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+                osc.frequency.setValueAtTime(880, ctx.currentTime + 0.12);
+                gain.gain.setValueAtTime(0.08, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start();
+                osc.stop(ctx.currentTime + 0.4);
+            } catch (e) {}
+        }
+
         // ==========================================
-        // 6. 音声通話 & ビデオ通話機能（イラスト反映対応）
+        // 6. 音声通話 & ビデオ通話（イラスト対応）
         // ==========================================
         async function startCall(mode) {
             currentCallMode = mode;
@@ -800,80 +817,85 @@
             modal.classList.remove('hidden');
 
             document.getElementById('callBfName').textContent = bf.name;
-            document.getElementById('callTypeBadge').textContent = mode === 'video' ? 'ビデオ通話中' : '音声通話中';
+            const avatarCircle = document.getElementById('callAvatarCircle');
+            avatarCircle.className = `w-32 h-32 rounded-full bg-gradient-to-tr ${bf.color} flex items-center justify-center text-3xl font-bold shadow-2xl border-4 border-white/30 avatar-breathe z-10 overflow-hidden`;
+            avatarCircle.innerHTML = renderAvatarInner(bf);
 
-            const avatar = document.getElementById('callAvatarCircle');
             const fullBgImg = document.getElementById('callFullBgImage');
-            const centerWrapper = document.getElementById('callCenterAvatarWrapper');
-
-            avatar.className = `w-32 h-32 rounded-full bg-gradient-to-tr ${bf.color} flex items-center justify-center text-3xl font-bold shadow-2xl border-4 border-white/30 avatar-breathe z-10 overflow-hidden`;
-            renderAvatarContent(avatar, bf, 'text-3xl');
-
-            // ビデオ通話モード＆彼氏のイラストがある場合は全画面立ち絵風に表示！
-            if (mode === 'video' && bf.image) {
-                fullBgImg.src = bf.image;
-                fullBgImg.classList.remove('hidden');
-                fullBgImg.classList.add('avatar-breathe');
-                centerWrapper.classList.add('hidden');
-            } else {
-                fullBgImg.classList.add('hidden');
-                fullBgImg.classList.remove('avatar-breathe');
-                centerWrapper.classList.remove('hidden');
-            }
-
-            callSeconds = 0;
-            updateCallTimer();
-            callTimerInterval = setInterval(() => {
-                callSeconds++;
-                updateCallTimer();
-            }, 1000);
-
-            const selfVideoContainer = document.getElementById('selfVideoContainer');
+            const selfVid = document.getElementById('selfVideoContainer');
             const toggleCamBtn = document.getElementById('toggleCamBtn');
+
             if (mode === 'video') {
-                selfVideoContainer.classList.remove('hidden');
+                document.getElementById('callTypeBadge').textContent = 'ビデオ通話中';
+                selfVid.classList.remove('hidden');
                 toggleCamBtn.classList.remove('hidden');
+
+                if (bf.image) {
+                    fullBgImg.src = bf.image;
+                    fullBgImg.classList.remove('hidden');
+                } else {
+                    fullBgImg.classList.add('hidden');
+                }
+
                 try {
                     localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
                     document.getElementById('selfVideo').srcObject = localStream;
                 } catch (e) {
-                    showToast('カメラの許可が得られませんでした');
-                    selfVideoContainer.classList.add('hidden');
+                    showToast('カメラがオフのためイラスト画面のみで通話します');
                 }
             } else {
-                selfVideoContainer.classList.add('hidden');
+                document.getElementById('callTypeBadge').textContent = '音声通話中';
+                selfVid.classList.add('hidden');
                 toggleCamBtn.classList.add('hidden');
+                fullBgImg.classList.add('hidden');
             }
 
-            const greeting = `もしもし？どうしたの、急に声聞きたくなった？`;
+            callSeconds = 0;
+            updateCallTimerDisplay();
+            if (callTimerInterval) clearInterval(callTimerInterval);
+            callTimerInterval = setInterval(() => {
+                callSeconds++;
+                updateCallTimerDisplay();
+            }, 1000);
+
+            const greeting = mode === 'video'
+                ? `やっほー！顔見れて嬉しいよ。今日どうだった？`
+                : `もしもし？どうしたの、声聞きたくなった？`;
             document.getElementById('callSubtitle').textContent = `「${greeting}」`;
-            speakWithGeminiTTS(greeting);
+            speakBoyfriendVoice(greeting);
         }
 
-        function updateCallTimer() {
-            const m = Math.floor(callSeconds / 60).toString().padStart(2, '0');
-            const s = (callSeconds % 60).toString().padStart(2, '0');
-            document.getElementById('callTimer').textContent = `${m}:${s}`;
+        function updateCallTimerDisplay() {
+            const mins = Math.floor(callSeconds / 60).toString().padStart(2, '0');
+            const secs = (callSeconds % 60).toString().padStart(2, '0');
+            document.getElementById('callTimer').textContent = `${mins}:${secs}`;
+        }
+
+        function toggleCameraInCall() {
+            if (!localStream) return;
+            const videoTrack = localStream.getVideoTracks()[0];
+            if (videoTrack) {
+                videoTrack.enabled = !videoTrack.enabled;
+                showToast(videoTrack.enabled ? 'カメラをオンにしました' : 'カメラをオフにしました');
+            }
         }
 
         function endCall() {
             document.getElementById('callModal').classList.add('hidden');
             if (callTimerInterval) clearInterval(callTimerInterval);
             if (localStream) {
-                localStream.getTracks().forEach(t => t.stop());
+                localStream.getTracks().forEach(track => track.stop());
                 localStream = null;
+            }
+            if (recognition && isListening) {
+                recognition.stop();
             }
             if (currentAudio) {
                 currentAudio.pause();
                 currentAudio = null;
             }
-            if (recognition && isListening) recognition.stop();
             window.speechSynthesis.cancel();
-        }
-
-        function toggleCameraInCall() {
-            const container = document.getElementById('selfVideoContainer');
-            container.classList.toggle('hidden');
+            showToast('通話を終了しました');
         }
 
         function initSpeechRecognition() {
@@ -884,44 +906,37 @@
             recognition.lang = 'ja-JP';
             recognition.interimResults = false;
 
-            recognition.onstart = () => {
+            recognition.onstart = function() {
                 isListening = true;
-                const btn = document.getElementById('micSpeakBtn');
-                btn.classList.remove('bg-white', 'text-rose-600');
-                btn.classList.add('bg-rose-500', 'text-white', 'animate-pulse');
-                document.getElementById('micHintText').textContent = '聞いています... 話しかけてください';
+                document.getElementById('micSpeakBtn').classList.add('bg-rose-500', 'text-white', 'animate-pulse');
+                document.getElementById('micSpeakBtn').classList.remove('bg-white', 'text-rose-600');
+                document.getElementById('micHintText').textContent = 'あなたの声を聴いています...';
             };
 
-            recognition.onresult = async (event) => {
-                const spokenText = event.results[0][0].transcript;
-                document.getElementById('callSubtitle').textContent = `あなた: 「${spokenText}」\n（考え中...）`;
+            recognition.onend = function() {
+                isListening = false;
+                document.getElementById('micSpeakBtn').classList.remove('bg-rose-500', 'text-white', 'animate-pulse');
+                document.getElementById('micSpeakBtn').classList.add('bg-white', 'text-rose-600');
+                document.getElementById('micHintText').textContent = 'マイクを押して話しかける';
+            };
+
+            recognition.onresult = async function(event) {
+                const userSpoken = event.results[0][0].transcript;
+                document.getElementById('callSubtitle').textContent = `あなた: 「${userSpoken}」`;
 
                 const bf = getActiveBoyfriend();
-                bf.messages.push({ sender: 'user', text: `📞 ${spokenText}`, time: getCurrentTime() });
+                bf.messages.push({ sender: 'user', text: `（通話）${userSpoken}`, time: getCurrentTime() });
 
-                const reply = await callGeminiText(spokenText, false);
-                bf.messages.push({ sender: 'bf', text: `📞 ${reply}`, time: getCurrentTime() });
-                saveStateToStorage();
+                document.getElementById('micHintText').textContent = `${bf.name}が考えています...`;
+                const reply = await callGeminiText(userSpoken, false);
+
+                bf.messages.push({ sender: 'bf', text: `（通話）${reply}`, time: getCurrentTime() });
                 renderChat();
+                saveStateToStorage();
 
                 document.getElementById('callSubtitle').textContent = `「${reply}」`;
-                await speakWithGeminiTTS(reply);
+                speakBoyfriendVoice(reply);
             };
-
-            recognition.onerror = () => {
-                resetMicButton();
-                showToast('音声が聞き取れませんでした。もう一度押してね');
-            };
-
-            recognition.onend = () => resetMicButton();
-        }
-
-        function resetMicButton() {
-            isListening = false;
-            const btn = document.getElementById('micSpeakBtn');
-            btn.classList.add('bg-white', 'text-rose-600');
-            btn.classList.remove('bg-rose-500', 'text-white', 'animate-pulse');
-            document.getElementById('micHintText').textContent = 'マイクを押して話しかける';
         }
 
         function toggleVoiceRecognition() {
@@ -932,112 +947,105 @@
             if (isListening) {
                 recognition.stop();
             } else {
-                if (currentAudio) currentAudio.pause();
-                window.speechSynthesis.cancel();
                 recognition.start();
             }
         }
 
-        async function speakWithGeminiTTS(text) {
+        async function speakBoyfriendVoice(text) {
             const apiKey = appState.apiKey.trim();
             const bf = getActiveBoyfriend();
             const avatarCircle = document.getElementById('callAvatarCircle');
+            const fullBgImg = document.getElementById('callFullBgImage');
 
-            if (!apiKey) {
-                const uttr = new SpeechSynthesisUtterance(text);
-                uttr.lang = 'ja-JP';
-                uttr.pitch = 0.95;
-                uttr.onstart = () => avatarCircle.classList.add('talking-active');
-                uttr.onend = () => avatarCircle.classList.remove('talking-active');
-                window.speechSynthesis.speak(uttr);
-                return;
-            }
+            avatarCircle.classList.add('talking-active');
+            fullBgImg.classList.add('scale-105');
 
-            try {
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`;
-                const payload = {
-                    contents: [{ parts: [{ text: `日本語で感情を込めて自然に話してください: ${text}` }] }],
-                    generationConfig: {
-                        responseModalities: ["AUDIO"],
-                        speechConfig: {
-                            voiceConfig: { prebuiltVoiceConfig: { voiceName: bf.voice || "Puck" } }
-                        }
-                    },
-                    model: "gemini-2.5-flash-preview-tts"
-                };
+            const stopAnimation = () => {
+                avatarCircle.classList.remove('talking-active');
+                fullBgImg.classList.remove('scale-105');
+            };
 
-                const res = await fetch(url, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                const result = await res.json();
-                const part = result?.candidates?.[0]?.content?.parts?.[0];
-                const audioData = part?.inlineData?.data;
-                const mimeType = part?.inlineData?.mimeType;
+            if (apiKey) {
+                try {
+                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${encodeURIComponent(apiKey)}`;
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: `次のセリフを彼氏らしく感情を込めて自然に読み上げてください：\n${text}` }] }],
+                            generationConfig: {
+                                responseModalities: ['AUDIO'],
+                                speechConfig: {
+                                    voiceConfig: {
+                                        prebuiltVoiceConfig: {
+                                            voiceName: bf.voice || 'Puck'
+                                        }
+                                    }
+                                }
+                            }
+                        })
+                    });
 
-                if (audioData && mimeType && mimeType.startsWith("audio/")) {
-                    const rateMatch = mimeType.match(/rate=(\d+)/);
-                    const sampleRate = rateMatch ? parseInt(rateMatch[1], 10) : 24000;
-                    const pcmBuffer = base64ToArrayBuffer(audioData);
-                    const pcm16 = new Int16Array(pcmBuffer);
-                    const wavBlob = pcmToWav(pcm16, sampleRate);
-                    const audioUrl = URL.createObjectURL(wavBlob);
-
-                    currentAudio = new Audio(audioUrl);
-                    currentAudio.onplay = () => avatarCircle.classList.add('talking-active');
-                    currentAudio.onended = () => avatarCircle.classList.remove('talking-active');
-                    currentAudio.play();
+                    const data = await response.json();
+                    const inlineData = data.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+                    if (inlineData && inlineData.data) {
+                        const wavBlob = pcmBase64ToWavBlob(inlineData.data, 24000);
+                        const audioUrl = URL.createObjectURL(wavBlob);
+                        if (currentAudio) currentAudio.pause();
+                        currentAudio = new Audio(audioUrl);
+                        currentAudio.onended = stopAnimation;
+                        await currentAudio.play();
+                        return;
+                    }
+                } catch (e) {
+                    console.warn('Gemini TTS fallback to browser speech:', e);
                 }
-            } catch (e) {
-                console.error('TTS Error:', e);
             }
+
+            window.speechSynthesis.cancel();
+            const utter = new SpeechSynthesisUtterance(text);
+            utter.lang = 'ja-JP';
+            utter.pitch = 0.95;
+            utter.rate = 1.02;
+            utter.onend = stopAnimation;
+            utter.onerror = stopAnimation;
+            window.speechSynthesis.speak(utter);
         }
 
-        function base64ToArrayBuffer(base64) {
-            const binaryString = atob(base64);
+        function pcmBase64ToWavBlob(base64Pcm, sampleRate) {
+            const binaryString = atob(base64Pcm);
             const len = binaryString.length;
             const bytes = new Uint8Array(len);
-            for (let i = 0; i < len; i++) bytes[i] = binaryString.charCodeAt(i);
-            return bytes.buffer;
-        }
-
-        function pcmToWav(pcm16, sampleRate) {
-            const numChannels = 1;
-            const byteRate = sampleRate * numChannels * 2;
-            const blockAlign = numChannels * 2;
-            const dataSize = pcm16.length * 2;
-            const buffer = new ArrayBuffer(44 + dataSize);
-            const view = new DataView(buffer);
-
-            writeString(view, 0, 'RIFF');
-            view.setUint32(4, 36 + dataSize, true);
-            writeString(view, 8, 'WAVE');
-            writeString(view, 12, 'fmt ');
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            const wavHeader = new ArrayBuffer(44);
+            const view = new DataView(wavHeader);
+            const writeString = (offset, string) => {
+                for (let i = 0; i < string.length; i++) {
+                    view.setUint8(offset + i, string.charCodeAt(i));
+                }
+            };
+            writeString(0, 'RIFF');
+            view.setUint32(4, 36 + len, true);
+            writeString(8, 'WAVE');
+            writeString(12, 'fmt ');
             view.setUint32(16, 16, true);
             view.setUint16(20, 1, true);
-            view.setUint16(22, numChannels, true);
+            view.setUint16(22, 1, true);
             view.setUint32(24, sampleRate, true);
-            view.setUint32(28, byteRate, true);
-            view.setUint16(32, blockAlign, true);
+            view.setUint32(28, sampleRate * 2, true);
+            view.setUint16(32, 2, true);
             view.setUint16(34, 16, true);
-            writeString(view, 36, 'data');
-            view.setUint32(40, dataSize, true);
+            writeString(36, 'data');
+            view.setUint32(40, len, true);
 
-            let offset = 44;
-            for (let i = 0; i < pcm16.length; i++, offset += 2) view.setInt16(offset, pcm16[i], true);
-            return new Blob([buffer], { type: 'audio/wav' });
-        }
-
-        function writeString(view, offset, string) {
-            for (let i = 0; i < string.length; i++) view.setUint8(offset + i, string.charCodeAt(i));
+            return new Blob([wavHeader, bytes], { type: 'audio/wav' });
         }
 
         // ==========================================
-        // 7. 設定モーダル・イラストアップロード・タブ操作
+        // 7. 設定モーダル & 画像リサイズ処理
         // ==========================================
-        let editingBfId = null;
-
         function switchSettingsTab(tab) {
             const tabBf = document.getElementById('tabContentBf');
             const tabWorkers = document.getElementById('tabContentWorkers');
@@ -1058,14 +1066,22 @@
         }
 
         function openSettingsModal() {
-            editingBfId = appState.activeBfId;
+            const bf = getActiveBoyfriend();
             document.getElementById('apiKeyInput').value = appState.apiKey || '';
             document.getElementById('workerUrlInput').value = appState.workerUrl || '';
-            document.getElementById('autoTimerInput').value = appState.autoTimerSeconds || 0;
             updateApiBadge();
+
+            tempUploadedImage = bf.image || '';
+            updatePreviewAvatar(bf.name, bf.color, tempUploadedImage);
+
+            document.getElementById('bfNameInput').value = bf.name;
+            document.getElementById('bfColorInput').value = bf.color;
+            document.getElementById('bfVoiceInput').value = bf.voice || 'Puck';
+            document.getElementById('bfPromptInput').value = bf.prompt;
+            document.getElementById('autoTimerInput').value = appState.autoTimerSeconds || 0;
+
             renderBoyfriendCards();
-            loadBoyfriendForm(editingBfId);
-            switchSettingsTab('bf');
+            document.getElementById('deleteBfBtn').style.display = appState.boyfriends.length > 1 ? 'block' : 'none';
             document.getElementById('settingsModal').classList.remove('hidden');
         }
 
@@ -1073,33 +1089,19 @@
             document.getElementById('settingsModal').classList.add('hidden');
         }
 
-        function updateApiBadge() {
-            const key = document.getElementById('apiKeyInput').value.trim();
-            const badge = document.getElementById('apiStatusBadge');
-            if (key) {
-                badge.textContent = 'API設定済み';
-                badge.className = 'px-2 py-0.5 rounded-full text-[10px] bg-emerald-100 text-emerald-700 font-bold';
+        function updatePreviewAvatar(name, color, imgData) {
+            const box = document.getElementById('previewAvatarBox');
+            const removeBtn = document.getElementById('removeImgBtn');
+            box.className = `w-16 h-16 rounded-2xl bg-gradient-to-tr ${color} flex items-center justify-center text-white font-bold text-xl shrink-0 overflow-hidden shadow-sm border-2 border-white`;
+            if (imgData) {
+                box.innerHTML = `<img src="${imgData}" class="w-full h-full object-cover">`;
+                removeBtn.classList.remove('hidden');
             } else {
-                badge.textContent = '未設定（デモ動作中）';
-                badge.className = 'px-2 py-0.5 rounded-full text-[10px] bg-gray-200 text-gray-600';
+                box.textContent = (name || '彼').slice(0, 2);
+                removeBtn.classList.add('hidden');
             }
         }
 
-        document.getElementById('apiKeyInput').addEventListener('input', updateApiBadge);
-
-        function toggleApiKeyVisibility() {
-            const input = document.getElementById('apiKeyInput');
-            const icon = document.getElementById('eyeIcon');
-            if (input.type === 'password') {
-                input.type = 'text';
-                icon.classList.replace('fa-eye', 'fa-eye-slash');
-            } else {
-                input.type = 'password';
-                icon.classList.replace('fa-eye-slash', 'fa-eye');
-            }
-        }
-
-        // 画像リサイズ＆Base64変換（LocalStorage容量節約のため最大600pxに最適化）
         function handleImageUpload(event) {
             const file = event.target.files[0];
             if (!file) return;
@@ -1109,25 +1111,26 @@
                 const img = new Image();
                 img.onload = function() {
                     const canvas = document.createElement('canvas');
-                    const MAX_SIZE = 600;
+                    const maxSize = 400;
                     let width = img.width;
                     let height = img.height;
 
-                    if (width > height && width > MAX_SIZE) {
-                        height *= MAX_SIZE / width;
-                        width = MAX_SIZE;
-                    } else if (height > MAX_SIZE) {
-                        width *= MAX_SIZE / height;
-                        height = MAX_SIZE;
+                    if (width > height && width > maxSize) {
+                        height *= maxSize / width;
+                        width = maxSize;
+                    } else if (height > maxSize) {
+                        width *= maxSize / height;
+                        height = maxSize;
                     }
-
                     canvas.width = width;
                     canvas.height = height;
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0, width, height);
 
-                    tempUploadedImage = canvas.toDataURL('image/jpeg', 0.85);
-                    updatePreviewAvatar();
+                    tempUploadedImage = canvas.toDataURL('image/jpeg', 0.82);
+                    const name = document.getElementById('bfNameInput').value;
+                    const color = document.getElementById('bfColorInput').value;
+                    updatePreviewAvatar(name, color, tempUploadedImage);
                     showToast('イラストを読み込みました！');
                 };
                 img.src = e.target.result;
@@ -1138,92 +1141,73 @@
         function removeBoyfriendImage() {
             tempUploadedImage = '';
             document.getElementById('bfImageUpload').value = '';
-            updatePreviewAvatar();
+            const name = document.getElementById('bfNameInput').value;
+            const color = document.getElementById('bfColorInput').value;
+            updatePreviewAvatar(name, color, '');
         }
 
-        function updatePreviewAvatar() {
-            const box = document.getElementById('previewAvatarBox');
-            const removeBtn = document.getElementById('removeImgBtn');
-            const name = document.getElementById('bfNameInput').value.trim() || '彼氏';
-            const color = document.getElementById('bfColorInput').value;
-
-            box.className = `w-16 h-16 rounded-2xl bg-gradient-to-tr ${color} flex items-center justify-center text-white font-bold text-xl shrink-0 overflow-hidden shadow-sm border-2 border-white`;
-
-            if (tempUploadedImage) {
-                box.innerHTML = `<img src="${tempUploadedImage}" class="w-full h-full object-cover">`;
-                removeBtn.classList.remove('hidden');
+        function updateApiBadge() {
+            const badge = document.getElementById('apiStatusBadge');
+            const val = document.getElementById('apiKeyInput').value.trim();
+            const workerVal = getEffectiveWorkerUrl();
+            if (val) {
+                badge.textContent = 'API設定済み';
+                badge.className = 'px-2 py-0.5 rounded-full text-[10px] bg-emerald-100 text-emerald-700 font-bold';
+            } else if (workerVal) {
+                badge.textContent = 'Workers連携中';
+                badge.className = 'px-2 py-0.5 rounded-full text-[10px] bg-amber-100 text-amber-800 font-bold';
             } else {
-                box.innerHTML = `<span>${name.slice(0, 2)}</span>`;
-                removeBtn.classList.add('hidden');
+                badge.textContent = '未設定（デモ動作中）';
+                badge.className = 'px-2 py-0.5 rounded-full text-[10px] bg-gray-200 text-gray-600';
             }
         }
 
-        document.getElementById('bfNameInput').addEventListener('input', updatePreviewAvatar);
-        document.getElementById('bfColorInput').addEventListener('change', updatePreviewAvatar);
+        function toggleApiKeyVisibility() {
+            const input = document.getElementById('apiKeyInput');
+            const icon = document.getElementById('eyeIcon');
+            if (input.type === 'password') {
+                input.type = 'text';
+                icon.className = 'fa-solid fa-eye-slash';
+            } else {
+                input.type = 'password';
+                icon.className = 'fa-solid fa-eye';
+            }
+        }
 
         function renderBoyfriendCards() {
             const list = document.getElementById('boyfriendList');
             list.innerHTML = '';
 
             appState.boyfriends.forEach(bf => {
-                const isSelected = bf.id === editingBfId;
+                const isActive = bf.id === appState.activeBfId;
                 const card = document.createElement('button');
                 card.type = 'button';
-                card.onclick = () => {
-                    saveCurrentFormTemp();
-                    editingBfId = bf.id;
-                    renderBoyfriendCards();
-                    loadBoyfriendForm(bf.id);
-                };
                 card.className = `p-2 rounded-2xl border text-center transition flex flex-col items-center gap-1 ${
-                    isSelected ? 'border-pink-500 bg-pink-50 shadow-xs' : 'border-gray-200 bg-white hover:bg-gray-50'
+                    isActive ? 'border-pink-500 bg-pink-50/80 shadow-xs' : 'border-gray-200 bg-white hover:bg-gray-50'
                 }`;
-
-                const avatarHtml = bf.image
-                    ? `<img src="${bf.image}" class="w-full h-full object-cover">`
-                    : `<span>${bf.name.slice(0, 1)}</span>`;
-
+                card.onclick = () => selectBoyfriend(bf.id);
                 card.innerHTML = `
-                    <div class="w-10 h-10 rounded-full bg-gradient-to-tr ${bf.color} text-white font-bold text-xs flex items-center justify-center overflow-hidden">
-                        ${avatarHtml}
+                    <div class="w-9 h-9 rounded-full bg-gradient-to-tr ${bf.color} text-white flex items-center justify-center font-bold text-xs overflow-hidden">
+                        ${renderAvatarInner(bf)}
                     </div>
-                    <span class="text-xs font-bold text-gray-800 truncate w-full">${bf.name}</span>
+                    <span class="text-xs font-bold text-gray-800 truncate w-full">${escapeHtml(bf.name)}</span>
                 `;
                 list.appendChild(card);
             });
-
-            document.getElementById('deleteBfBtn').style.display = appState.boyfriends.length > 1 ? 'block' : 'none';
         }
 
-        function loadBoyfriendForm(id) {
-            const bf = appState.boyfriends.find(b => b.id === id);
-            if (!bf) return;
-            document.getElementById('bfNameInput').value = bf.name;
-            document.getElementById('bfColorInput').value = bf.color;
-            document.getElementById('bfVoiceInput').value = bf.voice || 'Puck';
-            document.getElementById('bfPromptInput').value = bf.prompt;
-            tempUploadedImage = bf.image || '';
-            updatePreviewAvatar();
-        }
-
-        function saveCurrentFormTemp() {
-            const bf = appState.boyfriends.find(b => b.id === editingBfId);
-            if (!bf) return;
-            bf.name = document.getElementById('bfNameInput').value.trim() || '彼氏';
-            bf.color = document.getElementById('bfColorInput').value;
-            bf.voice = document.getElementById('bfVoiceInput').value;
-            bf.prompt = document.getElementById('bfPromptInput').value.trim();
-            bf.image = tempUploadedImage;
+        function selectBoyfriend(id) {
+            appState.activeBfId = id;
+            openSettingsModal();
         }
 
         function createNewBoyfriend() {
-            saveCurrentFormTemp();
             const newId = 'bf_' + Date.now();
             const newBf = {
                 id: newId,
                 name: '新しい彼氏',
                 color: 'from-purple-400 to-violet-600',
-                voice: 'Fenrir',
+                voice: 'Zephyr',
                 image: '',
                 prompt: 'あなたはユーザーの優しい彼氏です。ユーザーのことが大好きで、いつも寄り添ってくれます。自然なタメ口で話してください。',
                 messages: [
@@ -1231,60 +1215,76 @@
                 ]
             };
             appState.boyfriends.push(newBf);
-            editingBfId = newId;
-            renderBoyfriendCards();
-            loadBoyfriendForm(newId);
+            appState.activeBfId = newId;
+            openSettingsModal();
+            showToast('新しい彼氏枠を追加しました！');
         }
 
         function deleteCurrentBoyfriend() {
             if (appState.boyfriends.length <= 1) return;
-            appState.boyfriends = appState.boyfriends.filter(b => b.id !== editingBfId);
-            editingBfId = appState.boyfriends[0].id;
-            appState.activeBfId = editingBfId;
-            renderBoyfriendCards();
-            loadBoyfriendForm(editingBfId);
+            appState.boyfriends = appState.boyfriends.filter(b => b.id !== appState.activeBfId);
+            appState.activeBfId = appState.boyfriends[0].id;
+            saveStateToStorage();
+            openSettingsModal();
+            renderHeader();
+            renderChat();
+            showToast('削除しました');
+        }
+
+        async function testWorkerConnection() {
+            const rawInput = document.getElementById('workerUrlInput').value;
+            let urlInput = sanitizeWorkerUrl(rawInput);
+            if (!urlInput && window.location.hostname.endsWith('.workers.dev')) {
+                urlInput = window.location.origin;
+            }
+            document.getElementById('workerUrlInput').value = urlInput;
+            if (!urlInput) {
+                showToast('WorkersのURLを入力してください');
+                return;
+            }
+            try {
+                const res = await fetch(`${urlInput}/api/health`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                if (data.status) {
+                    showToast('接続成功！Cloudflare Workersと繋がりました！');
+                } else {
+                    showToast('応答はありましたが形式が異なります');
+                }
+            } catch (e) {
+                showToast(`接続エラー（${e.message}）`);
+            }
         }
 
         function saveSettings() {
-            saveCurrentFormTemp();
             appState.apiKey = document.getElementById('apiKeyInput').value.trim();
-            appState.workerUrl = sanitizeWorkerUrl(document.getElementById('workerUrlInput').value);
+            const cleanedUrl = sanitizeWorkerUrl(document.getElementById('workerUrlInput').value);
+            document.getElementById('workerUrlInput').value = cleanedUrl;
+            appState.workerUrl = cleanedUrl;
             appState.autoTimerSeconds = parseInt(document.getElementById('autoTimerInput').value, 10);
-            appState.activeBfId = editingBfId;
+
+            const bf = getActiveBoyfriend();
+            bf.name = document.getElementById('bfNameInput').value.trim() || '彼氏';
+            bf.color = document.getElementById('bfColorInput').value;
+            bf.voice = document.getElementById('bfVoiceInput').value;
+            bf.prompt = document.getElementById('bfPromptInput').value.trim();
+            bf.image = tempUploadedImage;
 
             saveStateToStorage();
             renderHeader();
             renderChat();
             setupAutoTimer();
             closeSettingsModal();
-            showToast('設定を保存しました！');
-        }
-
-        // ==========================================
-        // 8. 共通ユーティリティ関数
-        // ==========================================
-        function getActiveBoyfriend() {
-            return appState.boyfriends.find(b => b.id === appState.activeBfId) || appState.boyfriends[0];
-        }
-
-        function renderAvatarContent(container, bf, textSizeClass) {
-            if (bf.image) {
-                container.innerHTML = `<img src="${bf.image}" alt="${bf.name}" class="w-full h-full object-cover">`;
-            } else {
-                container.innerHTML = `<span class="${textSizeClass}">${bf.name.slice(0, 2)}</span>`;
-            }
-        }
-
-        function getCurrentTime() {
-            const now = new Date();
-            return now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+            showToast(`${bf.name}の設定を保存しました！`);
         }
 
         function showToast(msg) {
             const toast = document.getElementById('toastMsg');
             toast.textContent = msg;
             toast.classList.remove('hidden');
-            setTimeout(() => toast.classList.add('hidden'), 2800);
+            setTimeout(() => {
+                toast.classList.add('hidden');
+            }, 3000);
         }
     </script>
 </body>
