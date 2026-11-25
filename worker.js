@@ -112,6 +112,25 @@ export default {
     const systemInstruction = `${activeBf.prompt}\n\n【重要ルール】\n・LINEのような自然な短文（1〜2文）で返信してください。\n・現在の日本時間は ${timeStr} です。`;
     const triggerPrompt = `（システム指示：現在時刻は${timeStr}です。ユーザーから連絡が来る前に、彼氏であるあなたの方から時間帯に合った自然なメッセージ（「おはよう」「お昼食べた？」「お疲れ様」「そろそろ寝る？」など）を1通送ってください。メッセージ本文のみ出力してください。）`;
 
+    try {
+      const reply = await generateGeminiReply(env.GEMINI_API_KEY, systemInstruction, triggerPrompt, history);
+
+      activeBf.messages = activeBf.messages || [];
+      activeBf.messages.push({
+        sender: "bf",
+        text: reply,
+        time: timeStr,
+        fromCron: true
+      });
+
+      await env.BOYFRIEND_KV.put("app_state", JSON.stringify(state));
+      console.log(`Cron message generated at ${timeStr}: ${reply}`);
+    } catch (e) {
+      console.error("Cron generation failed:", e);
+    }
+  }
+};
+
 async function generateGeminiReply(apiKey, systemPrompt, userMessage, history, imageBase64 = "") {
   const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
 
