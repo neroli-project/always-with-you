@@ -143,15 +143,3 @@ async function generateGeminiReply(apiKey, systemPrompt, userMessage, history) {
   if (data.error) {
     throw new Error(data.error.message);
   }
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || "ごめん、ちょっと電波悪かったみたい！";
-}
-
-function jsonResponse(obj, status = 200) {
-  return new Response(JSON.stringify(obj), {
-    status,
-    headers: {
-      "Content-Type": "application/json",
-      ...CORS_HEADERS
-    }
-  });
-}
