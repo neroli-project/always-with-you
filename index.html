@@ -676,6 +676,7 @@
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
+                            apiKey: apiKey,
                             prompt: systemInstruction,
                             message: finalUserPrompt,
                             history: isProactive ? recentHistory : recentHistory.slice(0, -1)

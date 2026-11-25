@@ -63,13 +63,14 @@ export default {
       // 【API 4】チャット返信・自発メッセージ生成（/api/chat で確実に処理）
       if (request.method === "POST" && (url.pathname === "/api/chat" || url.pathname === "/")) {
         const body = await request.json();
-        const { prompt, message, history = [] } = body;
+        const { apiKey, prompt, message, history = [] } = body;
+        const effectiveApiKey = env.GEMINI_API_KEY || (apiKey ? apiKey.trim() : "");
 
-        if (!env.GEMINI_API_KEY) {
-          return jsonResponse({ error: "Workers側に GEMINI_API_KEY が設定されていません" }, 500);
+        if (!effectiveApiKey) {
+          return jsonResponse({ error: "APIキーが未設定です。アプリ設定画面またはWorkersのSecretsにGEMINI_API_KEYを設定してください" }, 500);
         }
 
-        const geminiReply = await generateGeminiReply(env.GEMINI_API_KEY, prompt, message, history);
+        const geminiReply = await generateGeminiReply(effectiveApiKey, prompt, message, history);
         return jsonResponse({ reply: geminiReply });
       }
 
@@ -143,3 +144,15 @@ async function generateGeminiReply(apiKey, systemPrompt, userMessage, history) {
   if (data.error) {
     throw new Error(data.error.message);
   }
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || "ごめん、ちょっと電波悪かったみたい！";
+}
+
+function jsonResponse(obj, status = 200) {
+  return new Response(JSON.stringify(obj), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      ...CORS_HEADERS
+    }
+  });
+}
