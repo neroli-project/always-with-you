@@ -32,7 +32,7 @@ export default {
       }
 
       // 【API 2】KVに保存された最新データ（Cronで届いたメッセージ等）を取得
-      if (request.method === "GET" && url.pathname === "/sync") {
+      if (request.method === "GET" && (url.pathname === "/api/sync" || url.pathname === "/sync")) {
         if (!env.BOYFRIEND_KV) {
           return jsonResponse({ synced: false, reason: "KV_NOT_BOUND" });
         }
@@ -41,7 +41,7 @@ export default {
       }
 
       // 【API 3】アプリ側の状態（彼氏プロンプトや履歴）をKVへバックアップ保存
-      if (request.method === "POST" && url.pathname === "/save-state") {
+      if (request.method === "POST" && (url.pathname === "/api/save-state" || url.pathname === "/save-state")) {
         if (!env.BOYFRIEND_KV) {
           return jsonResponse({ saved: false, reason: "KV_NOT_BOUND" });
         }
@@ -60,8 +60,8 @@ export default {
         return jsonResponse({ saved: true });
       }
 
-      // 【API 4】チャット返信・自発メッセージ生成（Gemini API呼び出し）
-      if (request.method === "POST") {
+      // 【API 4】チャット返信・自発メッセージ生成（/api/chat で確実に処理）
+      if (request.method === "POST" && (url.pathname === "/api/chat" || url.pathname === "/")) {
         const body = await request.json();
         const { prompt, message, history = [] } = body;
 

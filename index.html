@@ -485,7 +485,7 @@
             const workerUrl = sanitizeWorkerUrl(appState.workerUrl);
             if (!workerUrl) return;
             try {
-                await fetch(`${workerUrl}/save-state`, {
+                await fetch(`${workerUrl}/api/save-state`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -502,7 +502,7 @@
             const workerUrl = sanitizeWorkerUrl(appState.workerUrl);
             if (!workerUrl) return;
             try {
-                const res = await fetch(`${workerUrl}/sync`);
+                const res = await fetch(`${workerUrl}/api/sync`);
                 const data = await res.json();
                 if (data.synced && data.state && data.state.boyfriends) {
                     let hasNewCronMsg = false;
@@ -644,10 +644,10 @@
                 ? `（システム指示：現在時刻は${nowStr}です。ユーザーから連絡が来る前に、彼氏であるあなたの方から自然に「今何してる？」「お疲れ様」などの気遣いや甘えるメッセージを1通送ってください。システム指示への返事は不要で、彼氏としてのメッセージだけを出力してください。）`
                 : userMessage;
 
-            // Cloudflare Workers URLが設定されている場合はそちらを優先利用（APIキー不要で安全に通信）
+            // Cloudflare Workers URLが設定されている場合は /api/chat へ送信（Assetsルーティングと競合しない専用パス）
             if (workerUrl) {
                 try {
-                    const res = await fetch(workerUrl, {
+                    const res = await fetch(`${workerUrl}/api/chat`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -657,7 +657,13 @@
                             history: history
                         })
                     });
-                    const data = await res.json();
+                    const rawText = await res.text();
+                    let data;
+                    try {
+                        data = JSON.parse(rawText);
+                    } catch (parseErr) {
+                        throw new Error(`サーバー応答形式エラー (Status ${res.status})`);
+                    }
                     if (data.error) throw new Error(data.error);
                     return data.reply || 'Workersからの応答を受信しました';
                 } catch (err) {
@@ -1049,13 +1055,6 @@
                 btnWorkers.className = 'flex-1 py-2.5 text-amber-600 border-b-2 border-amber-500 bg-white';
                 btnBf.className = 'flex-1 py-2.5 text-gray-500 hover:text-gray-700';
             }
-        }
-
-        function copyWorkerSnippet() {
-            const codeEl = document.getElementById('workerCodeSnippet');
-            if (!codeEl) return;
-            navigator.clipboard.writeText(codeEl.textContent);
-            showToast('Workers用コードをコピーしました！');
         }
 
         function openSettingsModal() {
