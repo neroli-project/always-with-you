@@ -132,8 +132,6 @@ export default {
 };
 
 async function generateGeminiReply(apiKey, systemPrompt, userMessage, history, imageBase64 = "") {
-  const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
-
   const userParts = [{ text: userMessage }];
   if (imageBase64 && imageBase64.includes(",")) {
     const [meta, dataPart] = imageBase64.split(",");
@@ -153,17 +151,31 @@ async function generateGeminiReply(apiKey, systemPrompt, userMessage, history, i
     }
   };
 
-  const res = await fetch(apiUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
+  // 無料枠の回数制限が非常に緩やかな2.5系モデルを優先使用（万が一上限に達したらliteへ自動切替）
+  const models = ["gemini-2.5-flash", "gemini-2.5-flash-lite"];
+  let lastError = null;
 
-  const data = await res.json();
-  if (data.error) {
-    throw new Error(data.error.message);
+  for (const model of models) {
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    const res = await fetch(apiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+    if (!data.error) {
+      return data.candidates?.[0]?.content?.parts?.[0]?.text || "ごめん、ちょっと電波悪かったみたい！";
+    }
+
+    lastError = new Error(data.error.message);
+    // 回数制限（429 / quota）エラーの場合のみ次のモデルへ自動切り替え
+    if (res.status !== 429 && !data.error.message.toLowerCase().includes("quota")) {
+      throw lastError;
+    }
   }
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || "ごめん、ちょっと電波悪かったみたい！";
+
+  throw lastError || new Error("AIからの応答を取得できませんでした");
 }
 
 function jsonResponse(obj, status = 200) {
