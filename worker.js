@@ -155,7 +155,7 @@ async function generateGeminiReply(apiKey, systemPrompt, userMessage, history, i
   };
 
   // 実在する3.8系・3系モデルを使用（混雑や上限時はリトライ＆自動切替）
-  const models = ["gemini-3.8-flash", "gemini-3.8-flash", "gemini-3-flash"];
+  const models = ["gemini-3.8-flash", "gemini-3.8-flash", "gemini-3-flash-preview"];
   let lastError = null;
 
   for (let i = 0; i < models.length; i++) {
