@@ -44,7 +44,7 @@ export default {
       if (request.method === "POST" && (url.pathname === "/api/save-state" || url.pathname === "/save-state")) {
         if (!env.BOYFRIEND_KV) {
           return jsonResponse({ saved: false, reason: "KV_NOT_BOUND" });
-        }
+        }　
         const body = await request.json();
         const lightBoyfriends = (body.boyfriends || []).map(bf => ({
           id: bf.id,
@@ -149,6 +149,8 @@ async function generateGeminiReply(apiKey, systemPrompt, userMessage, history, i
     systemInstruction: {
       parts: [{ text: systemPrompt }]
     }
+  };
+
   // 最新かつ回数制限が緩やかな3.8系モデルを使用（混雑や上限時は次のモデルへ自動切替）
   const models = ["gemini-3.8-flash", "gemini-3.8-flash-lite", "gemini-3-flash"];
   let lastError = null;
