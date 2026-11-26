@@ -44,7 +44,7 @@ export default {
       if (request.method === "POST" && (url.pathname === "/api/save-state" || url.pathname === "/save-state")) {
         if (!env.BOYFRIEND_KV) {
           return jsonResponse({ saved: false, reason: "KV_NOT_BOUND" });
-        }　
+        }
         const body = await request.json();
         const lightBoyfriends = (body.boyfriends || []).map(bf => ({
           id: bf.id,
@@ -131,6 +131,9 @@ export default {
   }
 };
 
+// ==========================================
+// 3. Google Gemini API 呼び出し共通関数（テキスト＆画像対応）
+// ==========================================
 async function generateGeminiReply(apiKey, systemPrompt, userMessage, history, imageBase64 = "") {
   const userParts = [{ text: userMessage }];
   if (imageBase64 && imageBase64.includes(",")) {
@@ -147,6 +150,10 @@ async function generateGeminiReply(apiKey, systemPrompt, userMessage, history, i
   const payload = {
     contents: [...history, { role: "user", parts: userParts }],
     systemInstruction: {
+      parts: [{ text: systemPrompt }]
+    }
+  };
+
   // 実在する3.8系・3系モデルを使用（混雑や上限時はリトライ＆自動切替）
   const models = ["gemini-3.8-flash", "gemini-3.8-flash", "gemini-3-flash"];
   let lastError = null;
