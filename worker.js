@@ -154,37 +154,37 @@ async function generateGeminiReply(apiKey, systemPrompt, userMessage, history, i
     }
   };
 
-  // 実在する3.8系・3系モデルを使用（混雑や上限時はリトライ＆自動切替）
-  const models = ["gemini-3.8-flash", "gemini-3.8-flash", "gemini-3-flash-preview"];
+  // 1. まず利用可能な軽量・高速モデルを優先順に試す（混雑・時間切れ防止のためタイムアウト短め）
+  let models = ["gemini-2.5-flash-lite", "gemini-3-flash-preview", "gemini-3.8-flash"];
   let lastError = null;
 
   for (let i = 0; i < models.length; i++) {
     const model = models[i];
-    if (i > 0) {
-      await new Promise(r => setTimeout(r, 800));
-    }
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-    const res = await fetch(apiUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000); // 12秒で次へ切り替え
 
-    const data = await res.json();
-    if (!data.error) {
-      return data.candidates?.[0]?.content?.parts?.[0]?.text || "ごめん、ちょっと電波悪かったみたい！";
-    }
+    try {
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const res = await fetch(apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
 
-    lastError = new Error(data.error.message);
-    const errMsg = data.error.message.toLowerCase();
-    // 回数制限（429/quota）や一時的なサーバー混雑（503/high demand/overloaded）の場合は次のモデルへ自動切り替え
-    const isRetryable = res.status === 429 || res.status === 503 || errMsg.includes("quota") || errMsg.includes("high demand") || errMsg.includes("overloaded");
-    if (!isRetryable) {
-      throw lastError;
+      const data = await res.json();
+      if (!data.error) {
+        return data.candidates?.[0]?.content?.parts?.[0]?.text || "ごめん、ちょっと電波悪かったみたい！";
+      }
+      lastError = new Error(data.error.message);
+    } catch (e) {
+      clearTimeout(timeoutId);
+      lastError = e;
     }
   }
 
-  throw lastError || new Error("AIからの応答を取得できませんでした");
+  throw lastError || new Error("現在AIサーバーが混み合っています。少し待ってからもう一度送ってみてね！");
 }
 
 function jsonResponse(obj, status = 200) {
