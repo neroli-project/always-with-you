@@ -147,15 +147,15 @@ async function generateGeminiReply(apiKey, systemPrompt, userMessage, history, i
   const payload = {
     contents: [...history, { role: "user", parts: userParts }],
     systemInstruction: {
-      parts: [{ text: systemPrompt }]
-    }
-  };
-
-  // 最新かつ回数制限が緩やかな3.8系モデルを使用（混雑や上限時は次のモデルへ自動切替）
-  const models = ["gemini-3.8-flash", "gemini-3.8-flash-lite", "gemini-3-flash"];
+  // 実在する3.8系・3系モデルを使用（混雑や上限時はリトライ＆自動切替）
+  const models = ["gemini-3.8-flash", "gemini-3.8-flash", "gemini-3-flash"];
   let lastError = null;
 
-  for (const model of models) {
+  for (let i = 0; i < models.length; i++) {
+    const model = models[i];
+    if (i > 0) {
+      await new Promise(r => setTimeout(r, 800));
+    }
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
     const res = await fetch(apiUrl, {
       method: "POST",
