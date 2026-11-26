@@ -151,8 +151,8 @@ async function generateGeminiReply(apiKey, systemPrompt, userMessage, history, i
     }
   };
 
-  // 無料枠の回数制限が非常に緩やかな2.5系モデルを優先使用（万が一上限に達したらliteへ自動切替）
-  const models = ["gemini-2.5-flash", "gemini-2.5-flash-lite"];
+  // 最新かつ回数制限が緩やかな3.8系モデルを使用（万が一上限に達したらliteへ自動切替）
+  const models = ["gemini-3.8-flash", "gemini-3.8-flash-lite"];
   let lastError = null;
 
   for (const model of models) {
