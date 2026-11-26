@@ -149,10 +149,8 @@ async function generateGeminiReply(apiKey, systemPrompt, userMessage, history, i
     systemInstruction: {
       parts: [{ text: systemPrompt }]
     }
-  };
-
-  // 最新かつ回数制限が緩やかな3.8系モデルを使用（万が一上限に達したらliteへ自動切替）
-  const models = ["gemini-3.8-flash", "gemini-3.8-flash-lite"];
+  // 最新かつ回数制限が緩やかな3.8系モデルを使用（混雑や上限時は次のモデルへ自動切替）
+  const models = ["gemini-3.8-flash", "gemini-3.8-flash-lite", "gemini-3-flash"];
   let lastError = null;
 
   for (const model of models) {
@@ -169,8 +167,10 @@ async function generateGeminiReply(apiKey, systemPrompt, userMessage, history, i
     }
 
     lastError = new Error(data.error.message);
-    // 回数制限（429 / quota）エラーの場合のみ次のモデルへ自動切り替え
-    if (res.status !== 429 && !data.error.message.toLowerCase().includes("quota")) {
+    const errMsg = data.error.message.toLowerCase();
+    // 回数制限（429/quota）や一時的なサーバー混雑（503/high demand/overloaded）の場合は次のモデルへ自動切り替え
+    const isRetryable = res.status === 429 || res.status === 503 || errMsg.includes("quota") || errMsg.includes("high demand") || errMsg.includes("overloaded");
+    if (!isRetryable) {
       throw lastError;
     }
   }
