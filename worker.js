@@ -154,14 +154,14 @@ async function generateGeminiReply(apiKey, systemPrompt, userMessage, history, i
     }
   };
 
-  // 1. まず利用可能な軽量・高速モデルを優先順に試す（混雑・時間切れ防止のためタイムアウト短め）
+  // 1. まず利用可能な軽量・高速モデルを優先順に試す（混雑時でもしっかり待つため25秒に設定）
   let models = ["gemini-2.5-flash-lite", "gemini-3-flash-preview", "gemini-3.8-flash"];
   let lastError = null;
 
   for (let i = 0; i < models.length; i++) {
     const model = models[i];
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000); // 12秒で次へ切り替え
+    const timeoutId = setTimeout(() => controller.abort(), 25000); // 25秒待つ
 
     try {
       const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
